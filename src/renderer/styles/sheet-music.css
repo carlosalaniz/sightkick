@@ -177,3 +177,27 @@
     transform: translateX(-1.5px);
   }
 }
+
+/* Reference legend: the pad you just hit lights up in its own color. */
+.sk-pad {
+  transform-origin: center;
+}
+
+.sk-pad-flash {
+  animation: sk-pad-flash 0.45s ease-out;
+}
+
+@keyframes sk-pad-flash {
+  0%,
+  20% {
+    background: color-mix(in srgb, var(--pad-color), transparent 25%);
+    box-shadow: 0 0 16px 3px var(--pad-color);
+    color: white;
+    transform: scale(1.12);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+    transform: scale(1);
+  }
+}

@@ -10,7 +10,7 @@ import {
 import { cn } from '../../cn';
 import { Measure, RenderData } from '../../../chart-parser/types';
 import { Engine } from '../../services/engine';
-import { Song } from '../../../types';
+import { InputMapping, Song } from '../../../types';
 import { Reference } from './Reference';
 import { GameMode, PracticeRange } from '../../types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -33,6 +33,8 @@ export interface SheetMusicProps {
   enableColors: boolean;
   showReference: boolean;
   zoom: number;
+  /** When set, the reference legend lights up the pad you just hit. */
+  inputMapping?: InputMapping;
 }
 
 export function SheetMusic({
@@ -50,6 +52,7 @@ export function SheetMusic({
   showReference,
   enableColors,
   zoom,
+  inputMapping,
 }: SheetMusicProps) {
   const cursorRef = useRef<HTMLDivElement>(null);
   const highlightsRef = useMemo(
@@ -253,7 +256,10 @@ export function SheetMusic({
       </div>
 
       {enableColors && showReference && (
-        <Reference className="fixed bottom-10 left-1/2 -translate-x-1/2" />
+        <Reference
+          className="fixed bottom-10 left-1/2 -translate-x-1/2"
+          inputMapping={inputMapping}
+        />
       )}
     </div>
   );
