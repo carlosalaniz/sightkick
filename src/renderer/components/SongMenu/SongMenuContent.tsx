@@ -5,7 +5,7 @@ import { Divider } from 'antd';
 interface Props {
   showSplit: boolean;
   splitting: boolean;
-  onOpenDirectory: () => void;
+  onOpenDirectory?: () => void;
   onSplit: () => void;
 }
 
@@ -17,17 +17,19 @@ export function SongMenuContent({
 }: Props) {
   return (
     <>
-      <button
-        className="flex items-center gap-3 px-4 py-2 text-text-muted hover:text-text cursor-pointer bg-transparent border-0 whitespace-nowrap w-full text-left"
-        onClick={onOpenDirectory}
-      >
-        <FontAwesomeIcon icon={faFolder} className="w-4" />
-        Open song directory
-      </button>
+      {onOpenDirectory && (
+        <button
+          className="flex items-center gap-3 px-4 py-2 text-text-muted hover:text-text cursor-pointer bg-transparent border-0 whitespace-nowrap w-full text-left"
+          onClick={onOpenDirectory}
+        >
+          <FontAwesomeIcon icon={faFolder} className="w-4" />
+          Open song directory
+        </button>
+      )}
 
       {showSplit && (
         <>
-          <Divider />
+          {onOpenDirectory && <Divider />}
 
           <button
             className="flex items-center gap-3 px-4 py-2 text-text-muted hover:text-text cursor-pointer bg-transparent border-0 whitespace-nowrap w-full text-left disabled:opacity-40 disabled:cursor-default"

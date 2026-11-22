@@ -1,0 +1,18 @@
+services:
+  stem-server:
+    build: .
+    image: sightkick-stem-server
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - models:/models
+    environment:
+      # Any models audio-separator supports. "fast" is what the desktop app
+      # uses; "best" is slower with cleaner drums. The app picks per split.
+      SK_FAST_MODEL: ${SK_FAST_MODEL:-htdemucs.yaml}
+      SK_BEST_MODEL: ${SK_BEST_MODEL:-BS-Roformer-SW.ckpt}
+      SK_DEFAULT_QUALITY: ${SK_DEFAULT_QUALITY:-fast}
+    restart: unless-stopped
+
+volumes:
+  models:

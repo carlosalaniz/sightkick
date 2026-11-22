@@ -13,6 +13,7 @@ import { Tooltip } from '../Tooltip';
 import { SupportButton } from '../SupportButton/SupportButton';
 import { DISCORD_URL } from './constants';
 import { IS_WEB } from '../../platform';
+import { StemServerSettings } from '../StemServerSettings';
 
 // Must match BROWSER_ROOT_NAME in src/web/library.ts.
 const BROWSER_STORAGE = 'Browser storage';
@@ -117,13 +118,9 @@ export function SongListSettings({
 
       <Divider />
 
-      {IS_WEB ? null : (
-        <>
-          <StemToolsPanel />
+      {IS_WEB ? <StemServerSettings /> : <StemToolsPanel />}
 
-          <Divider />
-        </>
-      )}
+      <Divider />
 
       <Tooltip title="Join the community" placement="bottom">
         <Button

@@ -1,5 +1,6 @@
 import type { Channels, ElectronHandler } from '../preload/index';
 import * as handlers from './handlers';
+import { cancelSplit, checkStemServer, splitSong } from './stem-server';
 
 // Browser stand-in for the Electron preload bridge: the renderer keeps calling
 // window.electron.ipcRenderer, and messages are handled in-page instead of by
@@ -117,14 +118,29 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'check-stem-tools':
-      // Stem splitting runs a native binary; there is no browser equivalent.
-      reply(channel, { status: 'unsupported' });
+      // Splitting needs the optional stem server (stem-server/); without it
+      // the split option stays hidden.
+      run(
+        checkStemServer().then((ok) =>
+          reply(channel, { status: ok ? 'ready' : 'unsupported' }),
+        ),
+      );
+
+      break;
+
+    case 'split-song':
+      run(splitSong(reply, args[0] as string));
+
+      break;
+
+    case 'cancel-split':
+      cancelSplit(args[0] as string);
 
       break;
 
     default:
-      // Desktop-only: app updates, stem tool management, splitting and
-      // opening folders in the OS file manager.
+      // Desktop-only: app updates, stem tool downloads and opening folders
+      // in the OS file manager.
       break;
   }
 }

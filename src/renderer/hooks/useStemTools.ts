@@ -8,6 +8,7 @@ import {
   StemToolsPhase,
   StemToolsStatus,
 } from '../../types';
+import { IS_WEB } from '../platform';
 
 export function useStemTools() {
   const { notification } = App.useApp();
@@ -33,18 +34,23 @@ export function useStemTools() {
       setStemToolsStatus(response.status);
       setInstalledVersion(response.installedVersion);
 
-      if (response.status !== 'unsupported') {
+      if (response.status !== 'unsupported' && !IS_WEB) {
         window.electron.ipcRenderer.sendMessage('check-stem-tools-update');
       }
     };
 
     window.electron.ipcRenderer.sendMessage('check-stem-tools');
 
-    const offCheck =
-      window.electron.ipcRenderer.once<IpcCheckStemToolsResponse>(
-        'check-stem-tools',
-        applyStatus,
-      );
+    // The browser build re-checks whenever the stem server URL changes.
+    const offCheck = IS_WEB
+      ? window.electron.ipcRenderer.on<IpcCheckStemToolsResponse>(
+          'check-stem-tools',
+          applyStatus,
+        )
+      : window.electron.ipcRenderer.once<IpcCheckStemToolsResponse>(
+          'check-stem-tools',
+          applyStatus,
+        );
     const offUpdate =
       window.electron.ipcRenderer.on<IpcStemToolsRemoteResponse>(
         'check-stem-tools-update',

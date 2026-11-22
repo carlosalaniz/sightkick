@@ -20,8 +20,8 @@ export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
   const showSplit = stemToolsStatus === 'ready' && canSplit;
   const close = () => setIsOpen(false);
 
-  // The browser build can't split stems or open folders, so the menu is empty.
-  if (IS_WEB) {
+  // The browser build can't open folders, so its only item is splitting.
+  if (IS_WEB && !showSplit) {
     return null;
   }
 
@@ -40,13 +40,17 @@ export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
           <SongMenuContent
             showSplit={showSplit}
             splitting={splitting}
-            onOpenDirectory={() => {
-              window.electron.ipcRenderer.sendMessage(
-                'open-song-directory',
-                dir,
-              );
-              close();
-            }}
+            onOpenDirectory={
+              IS_WEB
+                ? undefined
+                : () => {
+                    window.electron.ipcRenderer.sendMessage(
+                      'open-song-directory',
+                      dir,
+                    );
+                    close();
+                  }
+            }
             onSplit={() => {
               onSplit();
               close();

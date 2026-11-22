@@ -60,7 +60,8 @@ Differences from the desktop app:
 
 * **Browser support**: Chrome or Edge for the full experience. Firefox works with songs stored in the browser; Safari has no Web MIDI, so it can't connect an e-kit.
 * **Song library**: by default, downloaded songs are saved in the browser's private storage. In Chrome and Edge you can instead point it at a folder on your computer, such as an existing Clone Hero library. The browser asks for folder permission again on later visits.
-* **Not available**: stem splitting (it needs a native tool), app auto-updates, and "open song folder". PDF export uses the browser's print dialog (choose "Save as PDF").
+* **Stem splitting**: runs on a small local server instead of inside the app. Start it with `cd stem-server && docker compose up --build` (see [stem-server/README.md](stem-server/README.md)). Then **Split stems** appears in the menu of any song with a single audio file, and the stems replace that audio.
+* **Not available**: app auto-updates and "open song folder". PDF export uses the browser's print dialog (choose "Save as PDF").
 
 `.github/workflows/web.yml` builds the web version and deploys it to GitHub Pages.
 

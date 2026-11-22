@@ -1,0 +1,6 @@
+audio-separator[cpu]==0.48.0
+# Imported by audio-separator but not declared by it (librosa made it optional).
+audioread==3.0.1
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
