@@ -1,0 +1,13 @@
+# Keep the web image's build context small.
+node_modules
+out
+release
+coverage
+.git
+.userdata
+stem-server
+docs
+e2e
+**/*.test.ts
+**/*.test.tsx
+**/*.stories.tsx

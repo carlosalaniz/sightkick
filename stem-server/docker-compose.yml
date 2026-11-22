@@ -16,3 +16,5 @@ services:
 
 volumes:
   models:
+    # Shared by both compose files so models download only once.
+    name: sightkick-models

@@ -1,0 +1,22 @@
+# Runs SightKick in the browser plus the stem server:
+#   docker compose up --build
+# then open http://localhost:4280 (set SK_WEB_PORT to change it)
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: sightkick-web
+    ports:
+      - "127.0.0.1:${SK_WEB_PORT:-4280}:80"
+    restart: unless-stopped
+
+  stem-server:
+    extends:
+      file: stem-server/docker-compose.yml
+      service: stem-server
+
+volumes:
+  models:
+    # Shared by both compose files so models download only once.
+    name: sightkick-models

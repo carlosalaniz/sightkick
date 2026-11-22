@@ -1,0 +1,21 @@
+# SightKick browser build, served as a static site by nginx.
+
+FROM node:20-slim AS build
+WORKDIR /app
+RUN corepack enable
+
+# Dependencies first so they're cached across source changes. Skipping
+# builds avoids downloading Electron and compiling native modules, which the
+# web build doesn't use.
+COPY package.json yarn.lock .yarnrc.yml ./
+COPY .yarn/releases .yarn/releases
+RUN yarn install --immutable --mode=skip-build
+
+COPY tsconfig.json vite.web.config.ts ./
+COPY assets assets
+COPY src src
+RUN yarn build:web
+
+FROM nginx:1.27-alpine
+COPY --from=build /app/out/web /usr/share/nginx/html
+EXPOSE 80

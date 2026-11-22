@@ -49,6 +49,16 @@ yarn package        # build a macOS app (yarn package:win / package:linux)
 
 SightKick also runs in the browser, with no install. `src/web` stands in for the Electron main process: it answers the same IPC channels with web APIs (File System Access / OPFS for the song library, IndexedDB for song data, Web MIDI for the kit, the Wake Lock API to keep the screen on).
 
+The quickest way to run it, with stem splitting included, is Docker:
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:4280. This starts the web app and the [stem server](stem-server/README.md). The first build takes a few minutes, and the first start downloads the splitting model (~80 MB). Set `SK_WEB_PORT` to use a different port.
+
+To develop instead:
+
 ```bash
 yarn web            # quickest: installs deps if needed, opens http://localhost:5173
 yarn start:web      # dev server
@@ -60,7 +70,7 @@ Differences from the desktop app:
 
 * **Browser support**: Chrome or Edge for the full experience. Firefox works with songs stored in the browser; Safari has no Web MIDI, so it can't connect an e-kit.
 * **Song library**: by default, downloaded songs are saved in the browser's private storage. In Chrome and Edge you can instead point it at a folder on your computer, such as an existing Clone Hero library. The browser asks for folder permission again on later visits.
-* **Stem splitting**: runs on a small local server instead of inside the app. Start it with `cd stem-server && docker compose up --build` (see [stem-server/README.md](stem-server/README.md)). Then **Split stems** appears in the menu of any song with a single audio file, and the stems replace that audio.
+* **Stem splitting**: runs on a small local server instead of inside the app. `docker compose up` at the repo root starts it along with the app; `cd stem-server && docker compose up --build` starts it alone (see [stem-server/README.md](stem-server/README.md)). Then **Split stems** appears in the menu of any song with a single audio file, and the stems replace that audio.
 * **Not available**: app auto-updates and "open song folder". PDF export uses the browser's print dialog (choose "Save as PDF").
 
 `.github/workflows/web.yml` builds the web version and deploys it to GitHub Pages.
