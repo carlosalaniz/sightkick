@@ -40,10 +40,28 @@ yarn install        # install dependencies
 yarn start          # run in dev mode (Electron + hot reload)
 yarn build          # compile main, preload, and renderer
 yarn lint           # ESLint with --fix
-yarn test           # Jest
+yarn test           # Vitest
 yarn storybook      # component stories on :6006
 yarn package        # build a macOS app (yarn package:win / package:linux)
 ```
+
+## Web version
+
+SightKick also runs in the browser, with no install. `src/web` stands in for the Electron main process: it answers the same IPC channels with web APIs (File System Access / OPFS for the song library, IndexedDB for song data, Web MIDI for the kit, the Wake Lock API to keep the screen on).
+
+```bash
+yarn start:web      # dev server
+yarn build:web      # static site in out/web (deployable to any static host)
+yarn preview:web    # serve the built site locally
+```
+
+Differences from the desktop app:
+
+* **Browser support**: Chrome or Edge for the full experience. Firefox works with songs stored in the browser; Safari has no Web MIDI, so it can't connect an e-kit.
+* **Song library**: by default, downloaded songs are saved in the browser's private storage. In Chrome and Edge you can instead point it at a folder on your computer, such as an existing Clone Hero library. The browser asks for folder permission again on later visits.
+* **Not available**: stem splitting (it needs a native tool), app auto-updates, and "open song folder". PDF export uses the browser's print dialog (choose "Save as PDF").
+
+`.github/workflows/web.yml` builds the web version and deploys it to GitHub Pages.
 
 ## Acknowledgements
 

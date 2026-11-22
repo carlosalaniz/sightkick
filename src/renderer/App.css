@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* Explicit so builds rooted elsewhere (vite.web.config.ts) still scan the renderer. */
+@source '.';
 @import './styles/fonts.css';
 @import './styles/theme.css';
 @import './styles/sheet-music.css';

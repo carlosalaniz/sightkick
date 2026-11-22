@@ -5,6 +5,7 @@ import { useStemToolsContext } from '../../context/StemToolsContext';
 import { popoverOpenChange, popoverStyles } from '../../overlayStyles';
 import { IconButton } from '../IconButton';
 import { SongMenuContent } from './SongMenuContent';
+import { IS_WEB } from '../../platform';
 
 interface Props {
   dir: string;
@@ -18,6 +19,11 @@ export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const showSplit = stemToolsStatus === 'ready' && canSplit;
   const close = () => setIsOpen(false);
+
+  // The browser build can't split stems or open folders, so the menu is empty.
+  if (IS_WEB) {
+    return null;
+  }
 
   return (
     <Popover

@@ -4,6 +4,9 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __SK_WEB__: 'false',
+  },
   test: {
     environment: 'jsdom',
     globals: true,

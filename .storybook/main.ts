@@ -13,6 +13,7 @@ const config: StorybookConfig = {
   },
   viteFinal: async (conf) => {
     conf.plugins = [tailwindcss(), ...(conf.plugins ?? [])];
+    conf.define = { ...conf.define, __SK_WEB__: 'false' };
 
     return conf;
   },

@@ -11,6 +11,9 @@ export default defineConfig({
   },
   renderer: {
     plugins: [tailwindcss(), react()],
+    define: {
+      __SK_WEB__: 'false',
+    },
     server: {
       watch: {
         ignored: ['**/*.test.*', '**/*.stories.*'],

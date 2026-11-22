@@ -3,7 +3,7 @@ import fs from 'fs';
 import ini from 'ini';
 import { randomUUID } from 'crypto';
 import { Difficulty, parseChartFile } from 'scan-chart';
-import { AudioData, Song, SongData } from '../types';
+import { AudioData, SongData } from '../types';
 import { ALL_DIFFICULTIES } from '../constants';
 import { stripColorMarkup } from '../colorMarkup';
 
@@ -25,31 +25,7 @@ function readSongIdFile(dir: string): string | undefined {
   }
 }
 
-export function toSong(stored: SongData): Song {
-  const rating = parseInt(stored.diff_drums ?? '', 10);
-
-  return {
-    id: stored.id,
-    dir: stored.dir,
-    albumCover: stored.albumCover ?? undefined,
-    name: stripColorMarkup(stored.name ?? ''),
-    artist: stripColorMarkup(stored.artist ?? ''),
-    album: stripColorMarkup(stored.album ?? ''),
-    charter: stripColorMarkup(stored.charter ?? ''),
-    genre: stored.genre ?? '',
-    year: stored.year ?? '',
-    fiveLaneDrums: stored.five_lane_drums === 'True',
-    proDrums: stored.pro_drums === 'True',
-    delaySeconds: (Number(stored.delay) || 0) / 1000,
-    drumDifficulty: Number.isNaN(rating) || rating < 0 ? 0 : rating,
-    format: stored.format,
-    audio: stored.audio,
-    drumDifficulties: stored.drumDifficulties,
-    liked: stored.liked,
-    updatedAt: stored.updatedAt,
-    scoreData: stored.scoreData,
-  };
-}
+export { toSong } from '../songData';
 
 function readDrumDifficulties(
   dir: string,
