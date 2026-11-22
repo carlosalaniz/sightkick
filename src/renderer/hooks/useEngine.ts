@@ -28,6 +28,8 @@ interface UseEngineParams {
   playheadStyle: PlayheadStyle;
   mapping: InputMapping;
   player: PlayerMode;
+  hitWindowMs: number;
+  muteDrumsOnMiss: boolean;
   onEnded: (score: ScoreData) => void;
 }
 
@@ -43,6 +45,7 @@ interface UseEngineResult {
   countInBeat: number | undefined;
   countInBeatMs: number | undefined;
   duration: number;
+  hasDrumStem: boolean;
   play: () => void;
   playFromTick: (tick: number) => void;
   pause: () => void;
@@ -78,6 +81,8 @@ export function useEngine({
   playheadStyle,
   mapping,
   player,
+  hitWindowMs,
+  muteDrumsOnMiss,
   onEnded,
 }: UseEngineParams): UseEngineResult {
   const { notification } = App.useApp();
@@ -151,6 +156,13 @@ export function useEngine({
     engine?.setSettings({ playheadStyle });
   }, [engine, playheadStyle]);
 
+  useEffect(() => {
+    engine?.setJudgeSettings({
+      hitToleranceSeconds: hitWindowMs / 1000,
+      muteDrumsOnMiss,
+    });
+  }, [engine, hitWindowMs, muteDrumsOnMiss]);
+
   const subscribe = useCallback(
     (listener: () => void) => engine?.subscribe(listener) ?? (() => {}),
     [engine],
@@ -196,6 +208,7 @@ export function useEngine({
     countInBeat: snapshot.countInBeat,
     countInBeatMs: snapshot.countInBeatMs,
     duration: snapshot.duration,
+    hasDrumStem: snapshot.isReady && (engine?.hasDrumStem ?? false),
     play,
     playFromTick,
     pause,

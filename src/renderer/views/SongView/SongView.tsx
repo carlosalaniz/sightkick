@@ -46,6 +46,8 @@ export function SongView() {
     showReference,
     zoom,
     stemDirection,
+    hitWindowMs,
+    muteDrumsOnMiss,
   } = useSongViewSettings();
   const { notification, message } = App.useApp();
   const [scoreData, setScoreData] = useState<ScoreData>();
@@ -107,6 +109,7 @@ export function SongView() {
     seekSeconds,
     setStemVolume,
     setMasterVolume: setEngineMasterVolume,
+    hasDrumStem,
   } = useEngine({
     trackData,
     isDev,
@@ -120,6 +123,8 @@ export function SongView() {
     player: policy.player,
     playheadStyle: policy.playheadOverride ?? playheadStyle,
     mapping: inputMapping,
+    hitWindowMs,
+    muteDrumsOnMiss,
     onEnded: (score) => {
       if (!policy.scoring) {
         return;
@@ -444,6 +449,7 @@ export function SongView() {
           }
           onExportPdf={onExportPdf}
           isExporting={isExporting}
+          hasDrumStem={hasDrumStem}
         />
       </div>
 
@@ -463,6 +469,7 @@ export function SongView() {
               zoom={zoom}
               enableColors={enableColors}
               showReference={showReference}
+              inputMapping={inputMapping}
               vexflowContainerRef={vexflowContainerRef}
               onSelectMeasure={(measure, event) => {
                 if ((event.ctrlKey || event.metaKey) && chart) {

@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { PlayheadStyle, PLAYHEAD_STYLES, StemDirection } from '../types';
 import { usePersisted } from '../hooks/usePersisted';
+import { HIT_TOLERANCE_SECONDS } from '../services/engine/constants';
 
 interface SongViewSettingsValue {
   playheadStyle: PlayheadStyle;
@@ -25,6 +26,10 @@ interface SongViewSettingsValue {
   setZoom: (z: number) => void;
   stemDirection: StemDirection;
   setStemDirection: (d: StemDirection) => void;
+  hitWindowMs: number;
+  setHitWindowMs: (ms: number) => void;
+  muteDrumsOnMiss: boolean;
+  setMuteDrumsOnMiss: (v: boolean) => void;
 }
 
 const SongViewSettingsContext = createContext<SongViewSettingsValue | null>(
@@ -59,6 +64,14 @@ export function SongViewSettingsProvider({
     'settings.stemDirection',
     -1,
   );
+  const [hitWindowMs, setHitWindowMs] = usePersisted<number>(
+    'settings.hitWindowMs',
+    HIT_TOLERANCE_SECONDS * 1000,
+  );
+  const [muteDrumsOnMiss, setMuteDrumsOnMiss] = usePersisted(
+    'settings.muteDrumsOnMiss',
+    false,
+  );
 
   useEffect(() => {
     if (!PLAYHEAD_STYLES.includes(playheadStyle)) {
@@ -84,6 +97,10 @@ export function SongViewSettingsProvider({
       setZoom,
       stemDirection,
       setStemDirection,
+      hitWindowMs,
+      setHitWindowMs,
+      muteDrumsOnMiss,
+      setMuteDrumsOnMiss,
     }),
     [
       playheadStyle,
@@ -102,6 +119,10 @@ export function SongViewSettingsProvider({
       setZoom,
       stemDirection,
       setStemDirection,
+      hitWindowMs,
+      setHitWindowMs,
+      muteDrumsOnMiss,
+      setMuteDrumsOnMiss,
     ],
   );
 

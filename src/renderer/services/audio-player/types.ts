@@ -7,7 +7,7 @@ export interface TrackConfig {
 
 export interface AudioTrackHandle {
   name: string;
-  setVolume(gain: number): void;
+  setVolume(gain: number, fadeSeconds?: number): void;
 }
 
 export interface LoopWindow {
@@ -28,6 +28,8 @@ export interface AudioPlayer {
   setMasterVolume(volume: number): void;
   setLoop?(loop: LoopWindow | undefined): void;
   contextTimeForSongTime(songTime: number): number;
+  /** Seconds between scheduling audio and hearing it. */
+  outputLatency?: number;
   destroy(): void;
 }
 

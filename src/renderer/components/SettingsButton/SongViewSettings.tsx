@@ -11,6 +11,10 @@ import { useApp } from '../../context/AppContext';
 import themedark from '../../theme';
 import { DISCORD_URL } from './constants';
 import { faDiscord } from '@fortawesome/free-brands-svg-icons';
+import {
+  MAX_HIT_TOLERANCE_MS,
+  MIN_HIT_TOLERANCE_MS,
+} from '../../services/engine/constants';
 
 interface Props {
   onExportPdf?: () => void;
@@ -19,6 +23,7 @@ interface Props {
   volumeSliders?: ReactNode[];
   clickControls?: ReactNode;
   masterVolumeControl?: ReactNode;
+  hasDrumStem?: boolean;
 }
 
 export function SongViewSettings({
@@ -28,6 +33,7 @@ export function SongViewSettings({
   gameMode,
   clickControls,
   masterVolumeControl,
+  hasDrumStem = true,
 }: Props) {
   const {
     playheadStyle,
@@ -46,6 +52,10 @@ export function SongViewSettings({
     setZoom,
     stemDirection,
     setStemDirection,
+    hitWindowMs,
+    setHitWindowMs,
+    muteDrumsOnMiss,
+    setMuteDrumsOnMiss,
   } = useSongViewSettings();
   const { isDev } = useApp();
 
@@ -95,6 +105,61 @@ export function SongViewSettings({
           <Divider />
         </>
       )}
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <SettingLabel
+            label="Mute drums on miss"
+            tooltip={
+              hasDrumStem
+                ? "Like Guitar Hero: miss a note and the song's drums cut out until you hit the next one."
+                : "This song has no separate drum track, so there's nothing to mute."
+            }
+          />
+          <Switch
+            size="small"
+            data-testid="setting-mute-on-miss"
+            checked={muteDrumsOnMiss && hasDrumStem}
+            disabled={!hasDrumStem}
+            onChange={setMuteDrumsOnMiss}
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <SettingLabel
+            label="Hit window (± ms)"
+            tooltip="How early or late a hit can land and still count. Smaller is stricter."
+          />
+          <InputNumber
+            data-testid="setting-hit-window"
+            mode="spinner"
+            size="small"
+            min={MIN_HIT_TOLERANCE_MS}
+            max={MAX_HIT_TOLERANCE_MS}
+            step={10}
+            value={hitWindowMs}
+            onChange={(newValue) => {
+              if (newValue === null) {
+                return;
+              }
+
+              setHitWindowMs(
+                Math.min(
+                  MAX_HIT_TOLERANCE_MS,
+                  Math.max(MIN_HIT_TOLERANCE_MS, newValue),
+                ),
+              );
+            }}
+            styles={{
+              input: {
+                width: '5ch',
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      <Divider />
 
       <Collapse
         size="small"

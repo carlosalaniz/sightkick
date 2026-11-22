@@ -575,3 +575,124 @@ describe('Judge', () => {
     });
   });
 });
+
+// 120 BPM at resolution 480 → 960 ticks per second (96 ticks = 100 ms).
+describe('Judge hit tolerance', () => {
+  it('uses the configured window instead of the default', () => {
+    const measures = [measure([note(['c/5'], 960)])];
+    const { engine } = setup({ measures }, { tick: 960 + 144 }); // 150 ms late
+
+    engine.handleInput(hit('midi:38'));
+    expect(engine.hitCount).toBe(0);
+
+    engine.setTolerance(0.2);
+    engine.handleInput(hit('midi:38'));
+    expect(engine.isHit(960, 'c/5')).toBe(true);
+  });
+
+  it('rejects hits outside a tighter window', () => {
+    const measures = [measure([note(['c/5'], 960)])];
+    const { engine } = setup({ measures }, { tick: 960 + 48 }); // 50 ms late
+
+    engine.setTolerance(0.03);
+    engine.handleInput(hit('midi:38'));
+
+    expect(engine.hitCount).toBe(0);
+  });
+});
+
+describe('Judge miss gate', () => {
+  function gateSetup(notes: Note[], mapping = { snare: ['midi:38'] }) {
+    const { engine } = setup({ measures: [measure(notes)], mapping });
+    const onGate = vi.fn();
+
+    engine.onGateChange(onGate);
+
+    return { engine, onGate };
+  }
+
+  it('closes when a mapped note comes due without being hit', () => {
+    const { engine, onGate } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setTick(959);
+    expect(engine.isGateOpen).toBe(true);
+
+    engine.setTick(960);
+    expect(engine.isGateOpen).toBe(false);
+    expect(onGate).toHaveBeenCalledWith(false);
+  });
+
+  it('stays open when the note was hit early', () => {
+    const { engine } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setTick(900);
+    engine.handleInput(hit('midi:38'));
+    engine.setTick(1000);
+
+    expect(engine.isGateOpen).toBe(true);
+  });
+
+  it('reopens on the next correct hit, including a late hit on the same note', () => {
+    const { engine, onGate } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setTick(970);
+    expect(engine.isGateOpen).toBe(false);
+
+    engine.handleInput(hit('midi:38'));
+    expect(engine.isGateOpen).toBe(true);
+    expect(onGate).toHaveBeenLastCalledWith(true);
+  });
+
+  it('does not close for wrong pads, which leave the gate as it was', () => {
+    const { engine } = gateSetup([note(['c/5'], 960)], {
+      snare: ['midi:38'],
+      kick: ['midi:36'],
+    } as never);
+
+    engine.setTick(970);
+    engine.handleInput(hit('midi:36'));
+
+    expect(engine.isGateOpen).toBe(false);
+  });
+
+  it('ignores notes for kit pieces that are not mapped', () => {
+    const { engine } = gateSetup([note(['a/5'], 960)]); // crash, unmapped
+
+    engine.setTick(1000);
+
+    expect(engine.isGateOpen).toBe(true);
+  });
+
+  it('checks notes ahead of the audible position by the lookahead', () => {
+    const { engine } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setGateLookahead(0.05); // 48 ticks
+    engine.setTick(911);
+    expect(engine.isGateOpen).toBe(true);
+
+    engine.setTick(912);
+    expect(engine.isGateOpen).toBe(false);
+  });
+
+  it('reopens and re-arms when playback seeks backwards', () => {
+    const { engine } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setTick(970);
+    expect(engine.isGateOpen).toBe(false);
+
+    engine.rewindTo(0);
+    expect(engine.isGateOpen).toBe(true);
+
+    engine.setTick(960);
+    expect(engine.isGateOpen).toBe(false);
+  });
+
+  it('does not move while disabled (paused or counting in)', () => {
+    const { engine } = gateSetup([note(['c/5'], 960)]);
+
+    engine.setEnabled(false);
+    engine.setTick(1000);
+
+    expect(engine.isGateOpen).toBe(true);
+  });
+});

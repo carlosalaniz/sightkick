@@ -14,6 +14,15 @@ export const ELEMENT_TO_KEYS: Record<string, string[]> = {
 
 export const HIT_TOLERANCE_SECONDS = 0.1;
 
+export const MIN_HIT_TOLERANCE_MS = 20;
+
+export const MAX_HIT_TOLERANCE_MS = 300;
+
+// Fade used when the miss gate mutes/unmutes the drums, to avoid clicks.
+export const DRUM_GATE_FADE_SECONDS = 0.005;
+
+export const DRUM_STEM_NAME = 'drums';
+
 export const ACCENT_VALUE_THRESHOLD = 90;
 
 export const GHOST_VALUE_THRESHOLD = 70;

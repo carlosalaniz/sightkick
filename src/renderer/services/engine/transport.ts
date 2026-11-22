@@ -36,6 +36,7 @@ export class Transport {
   private onErrorCb: () => void;
   private onSeekCb: (tick: number) => void;
   private chart: ParsedChart | undefined;
+  private hitToleranceSeconds = HIT_TOLERANCE_SECONDS;
   private measures: Measure[] = [];
   private delaySeconds = 0;
   private countInEnabled = false;
@@ -431,10 +432,26 @@ export class Transport {
     this.loopBeatOffset = 0;
   }
 
-  setStemVolume(name: string, gain: number): void {
+  setStemVolume(name: string, gain: number, fadeSeconds = 0): void {
     this.audioPlayer?.audioTracks
       .find((track) => track.name === name)
-      ?.setVolume(gain);
+      ?.setVolume(gain, fadeSeconds);
+  }
+
+  hasStem(name: string): boolean {
+    return (
+      this.audioPlayer?.audioTracks.some((track) => track.name === name) ??
+      false
+    );
+  }
+
+  get outputLatency(): number {
+    return this.audioPlayer?.outputLatency ?? 0;
+  }
+
+  /** Keeps the song running until the last note's hit window has closed. */
+  setHitTolerance(seconds: number): void {
+    this.hitToleranceSeconds = seconds;
   }
 
   setMasterVolume(gain: number): void {
@@ -537,7 +554,7 @@ export class Transport {
         this.chart &&
         lastMeasure &&
         secondsToTicks(
-          rawTime - this.delaySeconds - HIT_TOLERANCE_SECONDS,
+          rawTime - this.delaySeconds - this.hitToleranceSeconds,
           this.chart.resolution,
           this.chart.tempos,
         ) >= lastMeasure.endTick

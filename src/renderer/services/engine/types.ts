@@ -35,6 +35,15 @@ export interface EngineSettings {
 
 export type JudgeHitHandler = (pos: NotePos, prefixes: string[]) => void;
 
+export type JudgeGateHandler = (open: boolean) => void;
+
+export interface JudgeSettings {
+  /** Half-width of the hit window around each note, in seconds. */
+  hitToleranceSeconds: number;
+  /** Silence the drum stem after a missed note until the next correct hit. */
+  muteDrumsOnMiss: boolean;
+}
+
 export interface JudgeContext {
   chart: ParsedChart | undefined;
   measures: Measure[];

@@ -28,10 +28,19 @@ export abstract class BaseAudioTrack {
     return this._volume;
   }
 
-  setVolume(newVolume: number) {
+  /** `fadeSeconds` > 0 glides to the new volume instead of jumping (no click). */
+  setVolume(newVolume: number, fadeSeconds = 0) {
     this._volume = newVolume;
     this.gainNodes.forEach((gainNode) => {
-      gainNode.gain.setValueAtTime(newVolume, this.context.currentTime);
+      const now = this.context.currentTime;
+
+      if (fadeSeconds > 0) {
+        gainNode.gain.cancelScheduledValues(now);
+        gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+        gainNode.gain.linearRampToValueAtTime(newVolume, now + fadeSeconds);
+      } else {
+        gainNode.gain.setValueAtTime(newVolume, now);
+      }
     });
   }
 

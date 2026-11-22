@@ -4,6 +4,7 @@ import { InputEvent } from '../../input/types';
 import { secondsToTicks, ticksToSeconds } from '../../../chart-parser/timing';
 import {
   JudgeContext,
+  JudgeGateHandler,
   JudgeHitHandler,
   LoopRegion,
   NoteEntry,
@@ -30,6 +31,15 @@ export class Judge {
   private hitTotal = 0;
   private falseHitTicks: number[] = [];
   private hitListeners = new Set<JudgeHitHandler>();
+  private toleranceSeconds = HIT_TOLERANCE_SECONDS;
+  // Miss gate: closes when a note comes due with none of its mapped parts hit,
+  // reopens on the next correct hit. Drives "mute drums on miss".
+  private mappedPrefixes = new Set<string>();
+  private gateOpen = true;
+  private gateIdx = 0;
+  private gateTick: number | undefined;
+  private gateLookaheadSeconds = 0;
+  private gateListeners = new Set<JudgeGateHandler>();
 
   setContext(context: JudgeContext): void {
     const chartChanged = this.chart !== context.chart;
@@ -38,6 +48,11 @@ export class Judge {
     this.chart = context.chart;
     this.mapping = context.mapping;
     this.measures = context.measures;
+    this.mappedPrefixes = new Set(
+      Object.entries(context.mapping).flatMap(([element, controls]) =>
+        controls && controls.length > 0 ? ELEMENT_TO_KEYS[element] ?? [] : [],
+      ),
+    );
 
     if (measuresChanged) {
       this.buildNoteIndex();
@@ -50,6 +65,35 @@ export class Judge {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+  }
+
+  /** Half-width of the hit window, in seconds, on either side of a note. */
+  setTolerance(seconds: number): void {
+    this.toleranceSeconds = seconds;
+  }
+
+  get tolerance(): number {
+    return this.toleranceSeconds;
+  }
+
+  /**
+   * How far ahead of the audible position notes are checked by the miss gate,
+   * so a mute scheduled now lands when the note is actually heard.
+   */
+  setGateLookahead(seconds: number): void {
+    this.gateLookaheadSeconds = Math.max(0, seconds);
+  }
+
+  onGateChange(listener: JudgeGateHandler): () => void {
+    this.gateListeners.add(listener);
+
+    return () => {
+      this.gateListeners.delete(listener);
+    };
+  }
+
+  get isGateOpen(): boolean {
+    return this.gateOpen;
   }
 
   setLoopRegion(region: LoopRegion | undefined): void {
@@ -77,6 +121,7 @@ export class Judge {
     }
 
     this.currentTick = effectiveTick;
+    this.updateGate(effectiveTick);
   }
 
   rewindTo(tick: number): void {
@@ -89,6 +134,7 @@ export class Judge {
 
     this.falseHitTicks = this.falseHitTicks.filter((t) => t < tick);
     this.currentTick = tick;
+    this.resetGate(tick);
   }
 
   onHit(listener: JudgeHitHandler): () => void {
@@ -115,6 +161,7 @@ export class Judge {
     this.hits.clear();
     this.hitTotal = 0;
     this.falseHitTicks = [];
+    this.resetGate(undefined);
   }
 
   private buildNoteIndex(): void {
@@ -136,6 +183,59 @@ export class Judge {
 
     index.sort((a, b) => a.tick - b.tick);
     this.noteIndex = index;
+    this.resetGate(this.currentTick);
+  }
+
+  private setGate(open: boolean): void {
+    if (this.gateOpen === open) {
+      return;
+    }
+
+    this.gateOpen = open;
+    this.gateListeners.forEach((listener) => listener(open));
+  }
+
+  private resetGate(tick: number | undefined): void {
+    this.gateIdx = tick === undefined ? 0 : this.firstNoteAtOrAfter(tick);
+    this.gateTick = tick;
+    this.setGate(true);
+  }
+
+  private updateGate(tick: number): void {
+    const chart = this.chart;
+
+    if (!this.enabled || !chart) {
+      return;
+    }
+
+    if (this.gateTick !== undefined && tick < this.gateTick) {
+      this.resetGate(tick);
+    }
+
+    this.gateTick = tick;
+
+    const currentTimeS = ticksToSeconds(tick, chart.resolution, chart.tempos);
+    const dueTick = secondsToTicks(
+      currentTimeS + this.gateLookaheadSeconds,
+      chart.resolution,
+      chart.tempos,
+    );
+
+    while (
+      this.gateIdx < this.noteIndex.length &&
+      this.noteIndex[this.gateIdx].tick <= dueTick
+    ) {
+      const entry = this.noteIndex[this.gateIdx];
+      const mapped = entry.note.notes
+        .map(keyPrefix)
+        .filter((p) => this.mappedPrefixes.has(p));
+
+      if (mapped.length > 0 && !mapped.some((p) => this.isHit(entry.tick, p))) {
+        this.setGate(false);
+      }
+
+      this.gateIdx += 1;
+    }
   }
 
   private wrapLoopTick(tick: number): number {
@@ -156,7 +256,7 @@ export class Judge {
     const currentTimeS = ticksToSeconds(tick, chart.resolution, chart.tempos);
     const toleranceTicks =
       secondsToTicks(
-        currentTimeS + HIT_TOLERANCE_SECONDS,
+        currentTimeS + this.toleranceSeconds,
         chart.resolution,
         chart.tempos,
       ) - tick;
@@ -257,7 +357,7 @@ export class Judge {
     const currentTimeS = ticksToSeconds(tick, chart.resolution, chart.tempos);
     const toleranceTicks =
       secondsToTicks(
-        currentTimeS + HIT_TOLERANCE_SECONDS,
+        currentTimeS + this.toleranceSeconds,
         chart.resolution,
         chart.tempos,
       ) - tick;
@@ -330,6 +430,7 @@ export class Judge {
     }
 
     newPrefixes.forEach((p) => this.recordHit(hit.tick, p));
+    this.setGate(true);
     this.hitListeners.forEach((listener) => listener(pos, newPrefixes));
   }
 }

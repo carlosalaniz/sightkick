@@ -7,11 +7,13 @@ import { playerFactoryForMode } from '../audio-player/factories';
 import { Transport } from './transport';
 import { Judge } from './judge';
 import { GameRenderer } from './game-renderer';
+import { DRUM_GATE_FADE_SECONDS, DRUM_STEM_NAME } from './constants';
 import {
   EngineContext,
   EngineOptions,
   GameRendererRefs,
   EngineSettings,
+  JudgeSettings,
   LoopRegion,
   PlaybackSnapshot,
 } from './types';
@@ -32,6 +34,10 @@ export class Engine {
   private transportUnsub: () => void;
   private inputUnsub: () => void;
   private hitUnsub: () => void;
+  private gateUnsub: () => void;
+  // Volumes the user set in the mixer; the miss gate is applied on top.
+  private stemGains = new Map<string, number>();
+  private muteDrumsOnMiss = false;
 
   constructor(options: EngineOptions) {
     this.onEndedCb = options.onEnded;
@@ -61,6 +67,9 @@ export class Engine {
     );
     this.hitUnsub = this.judge.onHit((pos, prefixes) =>
       this.renderer.paintHit(pos, prefixes),
+    );
+    this.gateUnsub = this.judge.onGateChange(() =>
+      this.applyDrumGain(DRUM_GATE_FADE_SECONDS),
     );
   }
 
@@ -152,7 +161,25 @@ export class Engine {
   }
 
   setStemVolume(name: string, gain: number): void {
-    this.transport.setStemVolume(name, gain);
+    this.stemGains.set(name, gain);
+
+    if (name === DRUM_STEM_NAME) {
+      this.applyDrumGain();
+    } else {
+      this.transport.setStemVolume(name, gain);
+    }
+  }
+
+  setJudgeSettings(settings: JudgeSettings): void {
+    this.judge.setTolerance(settings.hitToleranceSeconds);
+    this.transport.setHitTolerance(settings.hitToleranceSeconds);
+    this.muteDrumsOnMiss = settings.muteDrumsOnMiss;
+    this.applyDrumGain();
+  }
+
+  /** False when the song has no separate drum track to silence. */
+  get hasDrumStem(): boolean {
+    return this.transport.hasStem(DRUM_STEM_NAME);
   }
 
   setMasterVolume(gain: number): void {
@@ -175,6 +202,7 @@ export class Engine {
       this.chart.tempos,
     );
 
+    this.judge.setGateLookahead(this.transport.outputLatency);
     this.judge.setTick(tick);
     this.renderer.render(chartTime, tick);
   }
@@ -184,7 +212,19 @@ export class Engine {
     this.transportUnsub();
     this.inputUnsub();
     this.hitUnsub();
+    this.gateUnsub();
     this.transport.dispose();
+  }
+
+  private applyDrumGain(fadeSeconds = 0): void {
+    const userGain = this.stemGains.get(DRUM_STEM_NAME) ?? 1;
+    const gated = this.muteDrumsOnMiss && !this.judge.isGateOpen;
+
+    this.transport.setStemVolume(
+      DRUM_STEM_NAME,
+      gated ? 0 : userGain,
+      fadeSeconds,
+    );
   }
 
   private handleFrame = (): void => {

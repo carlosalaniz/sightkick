@@ -603,3 +603,97 @@ describe('Engine', () => {
     expect(hasClass(postLoopNote, 'vf-note-hit')).toBe(false);
   });
 });
+
+describe('Engine mute drums on miss', () => {
+  async function gateSetup() {
+    const note = staveNote(['c/5']);
+    const ctx = await setup({
+      renderData: [
+        measureData(
+          0,
+          1920,
+          [rendered(480, note)],
+          [{ tick: 480, isRest: false, notes: ['c/5'] } as Note],
+        ),
+      ],
+    });
+    const drums = { name: 'drums', setVolume: vi.fn() };
+
+    (ctx.player as unknown as { audioTracks: unknown[] }).audioTracks = [drums];
+    ctx.engine.setMapping({ snare: ['midi:38'] });
+
+    return { ...ctx, drums };
+  }
+
+  function playTo(player: MockPlayer, seconds: number) {
+    player.currentTime = seconds;
+    flushFrame();
+  }
+
+  it('silences the drum stem when a note passes unhit and restores it on the next hit', async () => {
+    const { engine, player, drums } = await gateSetup();
+
+    engine.setStemVolume('drums', 0.8);
+    engine.setJudgeSettings({
+      hitToleranceSeconds: 0.1,
+      muteDrumsOnMiss: true,
+    });
+    engine.playFromTick(0);
+    playTo(player, 0.4);
+    drums.setVolume.mockClear();
+
+    playTo(player, 0.55); // note at 0.5 s passed unhit
+    expect(drums.setVolume).toHaveBeenLastCalledWith(0, expect.any(Number));
+
+    emitInput('midi:38'); // late but inside the 100 ms window
+    expect(drums.setVolume).toHaveBeenLastCalledWith(0.8, expect.any(Number));
+  });
+
+  it('leaves the drums alone when the option is off', async () => {
+    const { engine, player, drums } = await gateSetup();
+
+    engine.setStemVolume('drums', 0.8);
+    engine.setJudgeSettings({
+      hitToleranceSeconds: 0.1,
+      muteDrumsOnMiss: false,
+    });
+    engine.playFromTick(0);
+    playTo(player, 0.55);
+
+    expect(drums.setVolume).not.toHaveBeenCalledWith(0, expect.any(Number));
+  });
+
+  it('keeps the mixer volume when the user changes it while muted', async () => {
+    const { engine, player, drums } = await gateSetup();
+
+    engine.setJudgeSettings({
+      hitToleranceSeconds: 0.1,
+      muteDrumsOnMiss: true,
+    });
+    engine.playFromTick(0);
+    playTo(player, 0.55);
+
+    engine.setStemVolume('drums', 0.3);
+    expect(drums.setVolume).toHaveBeenLastCalledWith(0, expect.any(Number));
+
+    emitInput('midi:38');
+    expect(drums.setVolume).toHaveBeenLastCalledWith(0.3, expect.any(Number));
+  });
+
+  it('applies the configured hit window to scoring', async () => {
+    const { engine, player, onEnded } = await gateSetup();
+
+    engine.setJudgeSettings({
+      hitToleranceSeconds: 0.02,
+      muteDrumsOnMiss: false,
+    });
+    engine.playFromTick(0);
+    playTo(player, 0.55); // 50 ms late: outside a ±20 ms window
+    emitInput('midi:38');
+
+    player.onEnded();
+    expect(onEnded).toHaveBeenCalledWith(
+      expect.objectContaining({ hitNotes: 0 }),
+    );
+  });
+});
