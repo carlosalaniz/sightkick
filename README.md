@@ -50,6 +50,7 @@ yarn package        # build a macOS app (yarn package:win / package:linux)
 SightKick also runs in the browser, with no install. `src/web` stands in for the Electron main process: it answers the same IPC channels with web APIs (File System Access / OPFS for the song library, IndexedDB for song data, Web MIDI for the kit, the Wake Lock API to keep the screen on).
 
 ```bash
+yarn web            # quickest: installs deps if needed, opens http://localhost:5173
 yarn start:web      # dev server
 yarn build:web      # static site in out/web (deployable to any static host)
 yarn preview:web    # serve the built site locally

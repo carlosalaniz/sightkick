@@ -30,6 +30,7 @@
     "package:linux": "yarn build && electron-builder build -l --x64 --publish never",
     "rebuild": "electron-rebuild --parallel --types prod,dev,optional",
     "start": "cross-env SK_USER_DATA_DIR=./.userdata/main electron-vite dev",
+    "web": "node scripts/web.js",
     "start:web": "vite --config vite.web.config.ts",
     "start:clean": "node scripts/clean-userdata.js && cross-env SK_USER_DATA_DIR=./.userdata/clean electron-vite dev",
     "preview": "cross-env SK_USER_DATA_DIR=./.userdata/preview electron-vite preview",
