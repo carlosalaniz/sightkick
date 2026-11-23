@@ -516,9 +516,19 @@ export function LessonView({ session }: { session: PlaySession }) {
   const replayFrom = (from: number) => {
     const t = tracker.current;
 
-    // Hits from there on are played again; the rest of the pass stands.
+    // Hits from there on are played again; the rest of the pass stands. The
+    // judge already dropped its own hits from the seek on, so one it still
+    // counts was played after the seek, in the frame or two before this
+    // rewind was seen: keep it, or wait mode would hold for a note the judge
+    // won't take again, for good.
     [...t.hits.keys()].forEach((id) => {
-      if ((noteById.get(id)?.time ?? -Infinity) >= from - 1e-3) {
+      const note = noteById.get(id);
+
+      if (
+        note &&
+        note.time >= from - 1e-3 &&
+        !engine.isHit(note.tick, note.prefix)
+      ) {
         t.hits.delete(id);
       }
     });
