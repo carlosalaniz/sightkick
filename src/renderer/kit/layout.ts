@@ -1,8 +1,16 @@
 import { KIT_GRID } from './constants';
 import { collisionRadius, isCymbal, pieceRadius } from './geometry';
-import { Kit, KitPiece, PiecePositions } from './types';
+import { Kit, KitKind, KitPiece, PiecePositions } from './types';
 
 const GAP = 2.5;
+/**
+ * Half the kick's footprint per kit kind, in pad radii: an acoustic kick is
+ * drawn as a wide shell, an electronic one as a narrower tower.
+ */
+const KICK_HALF: Record<KitKind, { w: number; h: number }> = {
+  acoustic: { w: 1, h: 0.575 },
+  electronic: { w: 0.85, h: 0.6 },
+};
 const ROW_TOLERANCE = 6;
 
 interface Item {
@@ -196,8 +204,8 @@ export function layoutStandard(kit: Kit): PiecePositions {
   if (kick) {
     const r = pieceRadius(kick.p);
 
-    kickHalfW = kit.kind === 'acoustic' ? r : r * 0.85;
-    kickHalfH = kit.kind === 'acoustic' ? r * 0.575 : r * 0.6;
+    kickHalfW = r * KICK_HALF[kit.kind].w;
+    kickHalfH = r * KICK_HALF[kit.kind].h;
     kick.x = 50;
     kick.y = KICK_Y;
   }

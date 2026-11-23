@@ -7,8 +7,10 @@ import {
   KitPiece,
   pieceRadius,
 } from '../../../kit';
+import { assertNever } from '../../../../shared/assertNever';
 import { useAnimationFrame } from '../hooks';
 import { PlaySession } from '../session';
+import { KitPlayLayout, parseKitPlayLayout } from '../storedSettings';
 import {
   PassToast,
   PlayOptions,
@@ -31,9 +33,9 @@ import {
   TEXT_STYLE,
   useStrikeFlash,
 } from './arcade/StageParts';
-import { useArcade } from './arcade/useArcade';
+import { Arcade, useArcade } from './arcade/useArcade';
 
-type Layout = 'kit' | 'lanes';
+type Layout = KitPlayLayout;
 
 /** Top of the highway (viewBox y) and the straight-lanes hit line. */
 const TOP = -78;
@@ -58,27 +60,49 @@ function targetsFor(
   hands: KitPiece[],
   kick: KitPiece | undefined,
 ): { targets: Map<string, Target>; refY: number } {
+  switch (layout) {
+    case 'kit':
+      return kitTargets(hands, kick);
+
+    case 'lanes':
+      return laneTargets(hands, kick);
+
+    default:
+      return assertNever(layout, 'highway layout');
+  }
+}
+
+/** Targets on each pad of the top-down kit; the hit line is above the highest pad. */
+function kitTargets(
+  hands: KitPiece[],
+  kick: KitPiece | undefined,
+): { targets: Map<string, Target>; refY: number } {
   const targets = new Map<string, Target>();
 
-  if (layout === 'kit') {
-    for (const p of kick ? [...hands, kick] : hands) {
-      const r = pieceRadius(p);
+  for (const p of kick ? [...hands, kick] : hands) {
+    const r = pieceRadius(p);
 
-      targets.set(p.id, {
-        x: p.x,
-        y: p.y,
-        r,
-        kick: p === kick,
-        w: r * 1.5,
-        cym: isCymbal(p.type),
-      });
-    }
-
-    const tops = [...targets.values()].map((t) => t.y - t.r - 1.5);
-
-    return { targets, refY: Math.min(60, ...tops) };
+    targets.set(p.id, {
+      x: p.x,
+      y: p.y,
+      r,
+      kick: p === kick,
+      w: r * 1.5,
+      cym: isCymbal(p.type),
+    });
   }
 
+  const tops = [...targets.values()].map((t) => t.y - t.r - 1.5);
+
+  return { targets, refY: Math.min(60, ...tops) };
+}
+
+/** One straight lane per hand piece and a kick bar, all on the hit line. */
+function laneTargets(
+  hands: KitPiece[],
+  kick: KitPiece | undefined,
+): { targets: Map<string, Target>; refY: number } {
+  const targets = new Map<string, Target>();
   const n = hands.length;
 
   hands.forEach((p, i) =>
@@ -123,10 +147,11 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
   const [pools] = useState(() => new GemPools());
   const [rings] = useState(() => new Map<string, SVGCircleElement>());
   const [legend] = useState(() => new Map<string, HTMLLIElement>());
-  const [layout, setLayout] = usePersisted<Layout>(
+  const [storedLayout, setLayout] = usePersisted<Layout>(
     'settings.kitPlayLayout',
     'kit',
   );
+  const layout = parseKitPlayLayout(storedLayout) ?? 'kit';
   const { notes, bars, pieceByVoice, song } = session;
   const arcade = useArcade(session, PLAY_RULES, {
     onHit: (_note, piece, info, offset) => {
@@ -285,7 +310,6 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
   });
 
   const strike = (p: KitPiece) => () => session.strikePiece(p);
-  const kickKey = kick ? keyLabels.get(kick.id) : '';
 
   return (
     <div className="p-4 grid gap-4 items-start grid-cols-[240px_minmax(0,1fr)_240px] max-[1100px]:grid-cols-[minmax(0,1fr)_220px] max-[760px]:grid-cols-[minmax(0,1fr)]">
@@ -348,109 +372,14 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
               strokeWidth={0.3}
               strokeDasharray="1 1"
             />
-            {layout === 'kit' ? (
-              <KitLayer arcade={arcade} dim={0.9} showKeys />
-            ) : (
-              <>
-                {kick && (
-                  <g
-                    transform={`translate(50 ${HIT_Y})`}
-                    style={{ cursor: 'pointer' }}
-                    onPointerDown={strike(kick)}
-                  >
-                    <rect
-                      x={-44}
-                      y={-1}
-                      width={88}
-                      height={2}
-                      rx={1}
-                      fill={kick.color}
-                      opacity={0.55}
-                    />
-                    <rect
-                      data-flash={kick.id}
-                      x={-44}
-                      y={-1.4}
-                      width={88}
-                      height={2.8}
-                      rx={1.4}
-                      fill="#fff"
-                      opacity={0}
-                    />
-                    <text
-                      y={9}
-                      fontSize={2.6}
-                      fontWeight={600}
-                      textAnchor="middle"
-                      fill="var(--color-text)"
-                      stroke={HALO}
-                      strokeWidth={0.8}
-                      paintOrder="stroke"
-                      style={TEXT_STYLE}
-                    >
-                      {kickKey ? `${kick.name} · ${kickKey}` : kick.name}
-                    </text>
-                  </g>
-                )}
-                {hands.map((p) => {
-                  const t = targets.get(p.id);
-
-                  if (!t) {
-                    return null;
-                  }
-
-                  return (
-                    <g key={p.id}>
-                      <rect
-                        x={t.x - 5}
-                        y={TOP}
-                        width={10}
-                        height={HIT_Y - TOP}
-                        fill={p.color}
-                        opacity={0.05}
-                      />
-                      <g
-                        transform={`translate(${t.x} ${HIT_Y})`}
-                        style={{ cursor: 'pointer' }}
-                        onPointerDown={strike(p)}
-                      >
-                        <circle
-                          r={t.r}
-                          fill="#17181a"
-                          stroke={p.color}
-                          strokeWidth={t.cym ? 0.7 : 1.3}
-                          strokeDasharray={t.cym ? '1.2 .8' : undefined}
-                        />
-                        <circle
-                          data-flash={p.id}
-                          r={t.r}
-                          fill="#fff"
-                          opacity={0}
-                        />
-                        <KeyBadge
-                          x={0}
-                          y={0}
-                          label={keyLabels.get(p.id) ?? ''}
-                        />
-                        <text
-                          y={t.r + 4}
-                          fontSize={2.6}
-                          fontWeight={600}
-                          textAnchor="middle"
-                          fill="var(--color-text)"
-                          stroke={HALO}
-                          strokeWidth={0.8}
-                          paintOrder="stroke"
-                          style={TEXT_STYLE}
-                        >
-                          {p.name}
-                        </text>
-                      </g>
-                    </g>
-                  );
-                })}
-              </>
-            )}
+            <TargetLayer
+              layout={layout}
+              arcade={arcade}
+              hands={hands}
+              kick={kick}
+              targets={targets}
+              strike={strike}
+            />
             <g>
               {hands.map((p) => {
                 const t = targets.get(p.id);
@@ -506,10 +435,7 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
                   );
                 }
 
-                const r =
-                  layout === 'lanes'
-                    ? 3.6
-                    : Math.max(2.6, Math.min(4.2, t.r * 0.55));
+                const r = gemRadius(layout, t);
                 const a = r * 0.45;
 
                 return (
@@ -632,4 +558,164 @@ function Stat({
       </span>
     </div>
   );
+}
+
+/** The pads the notes fly to: the kit drawing, or a row of lane targets. */
+function TargetLayer({
+  layout,
+  arcade,
+  hands,
+  kick,
+  targets,
+  strike,
+}: {
+  layout: Layout;
+  arcade: Arcade;
+  hands: KitPiece[];
+  kick: KitPiece | undefined;
+  targets: Map<string, Target>;
+  strike: (p: KitPiece) => () => void;
+}) {
+  switch (layout) {
+    case 'kit':
+      return <KitLayer arcade={arcade} dim={0.9} showKeys />;
+
+    case 'lanes':
+      return (
+        <LaneTargets
+          arcade={arcade}
+          hands={hands}
+          kick={kick}
+          targets={targets}
+          strike={strike}
+        />
+      );
+
+    default:
+      return assertNever(layout, 'highway layout');
+  }
+}
+
+function LaneTargets({
+  arcade,
+  hands,
+  kick,
+  targets,
+  strike,
+}: {
+  arcade: Arcade;
+  hands: KitPiece[];
+  kick: KitPiece | undefined;
+  targets: Map<string, Target>;
+  strike: (p: KitPiece) => () => void;
+}) {
+  const { keyLabels } = arcade;
+  const kickKey = kick ? keyLabels.get(kick.id) : '';
+
+  return (
+    <>
+      {kick && (
+        <g
+          transform={`translate(50 ${HIT_Y})`}
+          style={{ cursor: 'pointer' }}
+          onPointerDown={strike(kick)}
+        >
+          <rect
+            x={-44}
+            y={-1}
+            width={88}
+            height={2}
+            rx={1}
+            fill={kick.color}
+            opacity={0.55}
+          />
+          <rect
+            data-flash={kick.id}
+            x={-44}
+            y={-1.4}
+            width={88}
+            height={2.8}
+            rx={1.4}
+            fill="#fff"
+            opacity={0}
+          />
+          <text
+            y={9}
+            fontSize={2.6}
+            fontWeight={600}
+            textAnchor="middle"
+            fill="var(--color-text)"
+            stroke={HALO}
+            strokeWidth={0.8}
+            paintOrder="stroke"
+            style={TEXT_STYLE}
+          >
+            {kickKey ? `${kick.name} · ${kickKey}` : kick.name}
+          </text>
+        </g>
+      )}
+      {hands.map((p) => {
+        const t = targets.get(p.id);
+
+        if (!t) {
+          return null;
+        }
+
+        return (
+          <g key={p.id}>
+            <rect
+              x={t.x - 5}
+              y={TOP}
+              width={10}
+              height={HIT_Y - TOP}
+              fill={p.color}
+              opacity={0.05}
+            />
+            <g
+              transform={`translate(${t.x} ${HIT_Y})`}
+              style={{ cursor: 'pointer' }}
+              onPointerDown={strike(p)}
+            >
+              <circle
+                r={t.r}
+                fill="#17181a"
+                stroke={p.color}
+                strokeWidth={t.cym ? 0.7 : 1.3}
+                strokeDasharray={t.cym ? '1.2 .8' : undefined}
+              />
+              <circle data-flash={p.id} r={t.r} fill="#fff" opacity={0} />
+              <KeyBadge x={0} y={0} label={keyLabels.get(p.id) ?? ''} />
+              <text
+                y={t.r + 4}
+                fontSize={2.6}
+                fontWeight={600}
+                textAnchor="middle"
+                fill="var(--color-text)"
+                stroke={HALO}
+                strokeWidth={0.8}
+                paintOrder="stroke"
+                style={TEXT_STYLE}
+              >
+                {p.name}
+              </text>
+            </g>
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+/** Radius of a hand gem: fixed in lanes, scaled to its pad on the kit. */
+function gemRadius(layout: Layout, t: Target): number {
+  switch (layout) {
+    case 'kit':
+      return Math.max(2.6, Math.min(4.2, t.r * 0.55));
+
+    case 'lanes':
+      return 3.6;
+
+    default:
+      return assertNever(layout, 'highway layout');
+  }
 }

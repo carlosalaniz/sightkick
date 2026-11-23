@@ -1,4 +1,5 @@
 import { ReactNode, SVGProps } from 'react';
+import { assertNever } from '../../shared/assertNever';
 import { KIT_HEIGHT, KIT_VIEWBOX, KIT_WIDTH, PIECE_TYPES } from './constants';
 import { byDrawOrder, hitRadius, pieceRadius } from './geometry';
 import { Kit, KitKind, KitPiece, PieceType } from './types';
@@ -112,24 +113,17 @@ function ring(count: number, radius: number, offset: number) {
   });
 }
 
-/** The drawing of one piece, centered on (0, 0), in kit units. */
-export function PieceBody({
-  piece,
+function KickBody({
   kind,
+  r,
+  color: c,
 }: {
-  piece: Pick<KitPiece, 'type' | 'size' | 'color'>;
   kind: KitKind;
+  r: number;
+  color: string;
 }) {
-  const info = PIECE_TYPES[piece.type];
-  const r = pieceRadius(piece);
-  const c = piece.color;
-
-  if (info.pedal) {
-    return <Pedal x={0} y={0} color={c} />;
-  }
-
-  if (piece.type === 'kick') {
-    if (kind === 'acoustic') {
+  switch (kind) {
+    case 'acoustic': {
       const h = r * 1.15;
 
       return (
@@ -165,68 +159,79 @@ export function PieceBody({
       );
     }
 
-    const w = r * 1.7;
-    const h = r * 1.2;
+    case 'electronic': {
+      const w = r * 1.7;
+      const h = r * 1.2;
 
-    return (
-      <>
-        <rect
-          x={-w / 2}
-          y={-h / 2}
-          width={w}
-          height={h}
-          rx={1.4}
-          fill="#1b1b1e"
-          stroke={c}
-          strokeWidth={0.9}
-        />
-        <ellipse
-          cx={0}
-          cy={h / 2 - 1.3}
-          rx={w / 2 - 1.3}
-          ry={1.5}
-          fill="url(#skMesh)"
-        />
-        <Pedal x={0} y={h / 2 + 6.2} color={c} />
-      </>
-    );
+      return (
+        <>
+          <rect
+            x={-w / 2}
+            y={-h / 2}
+            width={w}
+            height={h}
+            rx={1.4}
+            fill="#1b1b1e"
+            stroke={c}
+            strokeWidth={0.9}
+          />
+          <ellipse
+            cx={0}
+            cy={h / 2 - 1.3}
+            rx={w / 2 - 1.3}
+            ry={1.5}
+            fill="url(#skMesh)"
+          />
+          <Pedal x={0} y={h / 2 + 6.2} color={c} />
+        </>
+      );
+    }
+
+    default:
+      return assertNever(kind, 'kit kind');
   }
+}
 
-  if (!info.cymbal) {
-    return (
-      <>
-        {kind === 'acoustic' ? (
-          <>
-            {ring(8, r + 0.5, 0.2).map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r={0.55} fill="#b9bec5" />
-            ))}
-            <circle r={r} fill="url(#skChrome)" />
-            <circle r={r - 0.9} fill="url(#skHead)" />
-          </>
-        ) : (
-          <>
-            <circle r={r} fill="#141416" />
-            <circle
-              r={r - 0.75}
-              fill="none"
-              stroke="#ff8a80"
-              strokeOpacity={0.8}
-              strokeWidth={0.55}
-            />
-            <circle r={r - 1.25} fill="url(#skMesh)" />
-            {ring(6, r - 0.35, 0.5).map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r={0.3} fill="#777" />
-            ))}
-          </>
-        )}
-        <circle r={r + 1.3} fill="none" stroke={c} strokeWidth={0.9} />
-      </>
-    );
+function DrumHead({ kind, r }: { kind: KitKind; r: number }) {
+  switch (kind) {
+    case 'acoustic':
+      return (
+        <>
+          {ring(8, r + 0.5, 0.2).map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={0.55} fill="#b9bec5" />
+          ))}
+          <circle r={r} fill="url(#skChrome)" />
+          <circle r={r - 0.9} fill="url(#skHead)" />
+        </>
+      );
+
+    case 'electronic':
+      return (
+        <>
+          <circle r={r} fill="#141416" />
+          <circle
+            r={r - 0.75}
+            fill="none"
+            stroke="#ff8a80"
+            strokeOpacity={0.8}
+            strokeWidth={0.55}
+          />
+          <circle r={r - 1.25} fill="url(#skMesh)" />
+          {ring(6, r - 0.35, 0.5).map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={0.3} fill="#777" />
+          ))}
+        </>
+      );
+
+    default:
+      return assertNever(kind, 'kit kind');
   }
+}
 
-  return (
-    <>
-      {kind === 'acoustic' ? (
+function CymbalFace({ kind, r }: { kind: KitKind; r: number }) {
+  switch (kind) {
+    case 'acoustic':
+      return (
         <>
           <circle
             r={r}
@@ -246,13 +251,54 @@ export function PieceBody({
           ))}
           <circle r={r * 0.24} fill="url(#skBell)" />
         </>
-      ) : (
+      );
+
+    case 'electronic':
+      return (
         <>
           <circle r={r} fill="url(#skEcym)" stroke="#000" strokeWidth={0.3} />
           <path d={wedge(r, -2.4, -0.7)} fill="#34343a" opacity={0.8} />
           <circle r={r * 0.26} fill="#0f0f11" />
         </>
-      )}
+      );
+
+    default:
+      return assertNever(kind, 'kit kind');
+  }
+}
+
+/** The drawing of one piece, centered on (0, 0), in kit units. */
+export function PieceBody({
+  piece,
+  kind,
+}: {
+  piece: Pick<KitPiece, 'type' | 'size' | 'color'>;
+  kind: KitKind;
+}) {
+  const info = PIECE_TYPES[piece.type];
+  const r = pieceRadius(piece);
+  const c = piece.color;
+
+  if (info.pedal) {
+    return <Pedal x={0} y={0} color={c} />;
+  }
+
+  if (piece.type === 'kick') {
+    return <KickBody kind={kind} r={r} color={c} />;
+  }
+
+  if (!info.cymbal) {
+    return (
+      <>
+        <DrumHead kind={kind} r={r} />
+        <circle r={r + 1.3} fill="none" stroke={c} strokeWidth={0.9} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <CymbalFace kind={kind} r={r} />
       {piece.type === 'hihat' && <circle r={1.3} fill="#9aa1a8" />}
       <circle r={0.6} fill="#0b0b0b" />
       <circle r={r + 1.1} fill="none" stroke={c} strokeWidth={0.9} />
@@ -364,9 +410,15 @@ export function KitPieces({
   );
 }
 
+/** Label offset under the kick, per kit kind (its drawing differs). */
+const KICK_LABEL_Y: Record<KitKind, number> = {
+  acoustic: 0.9,
+  electronic: -0.5,
+};
+
 function labelY(p: KitPiece, kind: KitKind): number {
   if (p.type === 'kick') {
-    return kind === 'acoustic' ? 0.9 : -0.5;
+    return KICK_LABEL_Y[kind];
   }
 
   return p.type === 'hhpedal' ? 8.6 : hitRadius(p) + 4.4;

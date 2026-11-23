@@ -1,3 +1,4 @@
+import { assertNever } from '../../../../../shared/assertNever';
 /** SVG geometry of the staff, in viewBox units (the mock's 1200-wide staff). */
 
 export const VIEW_W = 1200;
@@ -57,9 +58,16 @@ export const LINE_STEPS = [8, 6, 4, 2, 0];
  * the current bar plus `look` more.
  */
 export function pixelsPerBeat(motion: Motion, look: number): number {
-  return motion === 'scroll'
-    ? (VIEW_W - PLAYHEAD_X) / (look * 4 + 0.6)
-    : (VIEW_W - PAGE_X) / ((look + 1) * 4);
+  switch (motion) {
+    case 'scroll':
+      return (VIEW_W - PLAYHEAD_X) / (look * 4 + 0.6);
+
+    case 'page':
+      return (VIEW_W - PAGE_X) / ((look + 1) * 4);
+
+    default:
+      return assertNever(motion, 'staff motion');
+  }
 }
 
 export interface StripPosition {
@@ -80,19 +88,25 @@ export function stripPosition(
   pageStart: number,
   ppb: number,
 ): StripPosition {
-  if (motion === 'scroll') {
-    return {
-      tx: PLAYHEAD_X - beat * ppb,
-      playheadX: PLAYHEAD_X,
-      playheadVisible: true,
-    };
+  switch (motion) {
+    case 'scroll':
+      return {
+        tx: PLAYHEAD_X - beat * ppb,
+        playheadX: PLAYHEAD_X,
+        playheadVisible: true,
+      };
+
+    case 'page': {
+      const start = Math.max(0, pageStart);
+
+      return {
+        tx: PAGE_X - start * ppb,
+        playheadX: PAGE_X + (beat - start) * ppb,
+        playheadVisible: beat >= 0,
+      };
+    }
+
+    default:
+      return assertNever(motion, 'staff motion');
   }
-
-  const start = Math.max(0, pageStart);
-
-  return {
-    tx: PAGE_X - start * ppb,
-    playheadX: PAGE_X + (beat - start) * ppb,
-    playheadVisible: beat >= 0,
-  };
 }

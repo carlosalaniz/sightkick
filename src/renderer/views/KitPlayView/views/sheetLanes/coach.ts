@@ -1,3 +1,4 @@
+import { assertNever } from '../../../../../shared/assertNever';
 import { mean, sd } from './scoring';
 
 /** A row needs this many hits before the coach says anything about it. */
@@ -99,19 +100,14 @@ export function coachTip<K>(
   report: CoachReport<K>,
   nameOf: (key: K) => string,
 ): string {
-  const flagged = report.rows.filter((r) => r.flag);
+  const flagged = report.rows.filter(
+    (r): r is CoachRow<K> & { flag: CoachFlag } => r.flag !== undefined,
+  );
 
   if (flagged.length > 0) {
     return flagged
       .slice(0, 2)
-      .map((r) => {
-        const name = nameOf(r.key);
-        const ms = Math.round(Math.abs(r.meanMs));
-
-        return r.flag === 'late'
-          ? `${name} is dragging about ${ms} ms. Start the stroke a little earlier.`
-          : `${name} is rushing about ${ms} ms. Let the stick fall with the click.`;
-      })
+      .map((r) => flagTip(r, nameOf(r.key)))
       .join(' ');
   }
 
@@ -122,4 +118,22 @@ export function coachTip<K>(
   const band = Math.round(report.band);
 
   return `Nothing audible to fix (quiet band ±${band} ms).${steadiness}`;
+}
+
+function flagTip(
+  row: { flag: CoachFlag; meanMs: number },
+  name: string,
+): string {
+  const ms = Math.round(Math.abs(row.meanMs));
+
+  switch (row.flag) {
+    case 'late':
+      return `${name} is dragging about ${ms} ms. Start the stroke a little earlier.`;
+
+    case 'early':
+      return `${name} is rushing about ${ms} ms. Let the stick fall with the click.`;
+
+    default:
+      return assertNever(row.flag, 'coach flag');
+  }
 }

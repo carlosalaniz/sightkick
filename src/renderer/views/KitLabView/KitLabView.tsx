@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { Dispatch, SetStateAction, useState } from 'react';
 import { Button, Segmented, Select } from 'antd';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { assertNever } from '../../../shared/assertNever';
 import { useKit } from '../../kit';
 import { BuildKit } from './BuildKit';
 import { LayoutHistory } from './kitEdits';
@@ -66,12 +67,29 @@ export function KitLabView() {
         </div>
       </div>
       <div className="grow min-h-0 overflow-auto px-4 pt-4 pb-8 font-ui text-sm text-text-body">
-        {tab === 'build' ? (
-          <BuildKit history={history} setHistory={setHistory} />
-        ) : (
-          <LearnPads />
-        )}
+        <TabBody tab={tab} history={history} setHistory={setHistory} />
       </div>
     </div>
   );
+}
+
+function TabBody({
+  tab,
+  history,
+  setHistory,
+}: {
+  tab: Tab;
+  history: LayoutHistory;
+  setHistory: Dispatch<SetStateAction<LayoutHistory>>;
+}) {
+  switch (tab) {
+    case 'build':
+      return <BuildKit history={history} setHistory={setHistory} />;
+
+    case 'learn':
+      return <LearnPads />;
+
+    default:
+      return assertNever(tab, 'kit lab tab');
+  }
 }
