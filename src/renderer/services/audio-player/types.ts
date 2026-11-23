@@ -17,6 +17,12 @@ export interface LoopWindow {
   end: number;
 }
 
+/** How a suspend of the player's audio clock (wait mode's freeze) ended. */
+export type FreezeResult = 'frozen' | 'failed' | 'timed-out';
+
+/** How a resume of the player's audio clock ended. */
+export type ThawResult = 'resumed' | 'failed' | 'timed-out';
+
 export interface AudioPlayer {
   ready: Promise<unknown>;
   context: AudioContext;
@@ -27,6 +33,13 @@ export interface AudioPlayer {
   start(offset?: number, startAt?: number): Promise<void> | void;
   stop(): void;
   pause(): void;
+  /**
+   * Stops the audio clock that the player and anything scheduled on its
+   * context run on, in place. Bounded: never waits forever on the browser.
+   */
+  freeze(): Promise<FreezeResult>;
+  /** Restarts the audio clock after `freeze` (or a browser autoplay block). */
+  thaw(): Promise<ThawResult>;
   setMasterVolume(volume: number): void;
   setLoop?(loop: LoopWindow | undefined): void;
   contextTimeForSongTime(songTime: number): number;

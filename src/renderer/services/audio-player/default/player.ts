@@ -67,7 +67,12 @@ export class DefaultAudioPlayer
     this.offset = offset;
 
     if (this.context.state === 'suspended') {
-      await this.context.resume().catch(() => {});
+      const thawed = await this.thaw();
+
+      // Sources scheduled on a context that isn't running would never play.
+      if (thawed !== 'resumed') {
+        throw new Error(`audio context did not resume: ${thawed}`);
+      }
     }
 
     const time = Math.max(

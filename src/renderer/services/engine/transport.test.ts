@@ -96,6 +96,10 @@ class MockAudioPlayer {
 
   pause = vi.fn();
 
+  freeze = vi.fn(() => this.context.suspend().then(() => 'frozen' as const));
+
+  thaw = vi.fn(() => this.context.resume().then(() => 'resumed' as const));
+
   stop = vi.fn(() => {
     this.isInitialised = false;
   });

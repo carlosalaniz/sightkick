@@ -1,9 +1,20 @@
 import { BaseAudioTrack } from './base-track';
-import { LoopWindow, TrackConfig } from './types';
+import { FreezeResult, LoopWindow, ThawResult, TrackConfig } from './types';
 import { downmixToMono, trimTrailingSilence } from './helpers';
+import { log } from '../../../shared/log';
+import { TimeoutError, withTimeout } from '../../../shared/withTimeout';
 
 /** An output timestamp older than this is from before a suspend: don't trust it. */
 const STALE_OUTPUT_STAMP_SECONDS = 0.1;
+/**
+ * How long a suspend or resume of the AudioContext may take. Both normally
+ * settle within a few audio buffers; one that hasn't after this long (a
+ * wedged audio device, a backgrounded tab) is treated as failed rather than
+ * left to stall wait mode or a start forever.
+ */
+const CONTEXT_STATE_TIMEOUT_MS = 2000;
+
+type StateChange = 'done' | 'failed' | 'timed-out';
 
 export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   context: AudioContext;
@@ -74,7 +85,47 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   }
 
   pause(): void {
-    this.context.suspend();
+    void this.freeze();
+  }
+
+  async freeze(): Promise<FreezeResult> {
+    const change = await this.changeContextState('suspend');
+
+    return change === 'done' ? 'frozen' : change;
+  }
+
+  async thaw(): Promise<ThawResult> {
+    const change = await this.changeContextState('resume');
+
+    return change === 'done' ? 'resumed' : change;
+  }
+
+  /** The browser's error stays here; callers get a named outcome. */
+  private async changeContextState(
+    change: 'suspend' | 'resume',
+  ): Promise<StateChange> {
+    const work =
+      change === 'suspend' ? this.context.suspend() : this.context.resume();
+
+    try {
+      await withTimeout(
+        work,
+        CONTEXT_STATE_TIMEOUT_MS,
+        `AudioContext.${change}`,
+      );
+
+      return 'done';
+    } catch (err) {
+      const outcome = err instanceof TimeoutError ? 'timed-out' : 'failed';
+
+      log.error(
+        `audio.${change}_failed`,
+        { outcome, contextState: this.context.state },
+        err,
+      );
+
+      return outcome;
+    }
   }
 
   get outputLatency(): number {

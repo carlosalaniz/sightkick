@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultAudioPlayer } from './player';
 import { TrackConfig } from '../types';
+import { log } from '../../../../shared/log';
 import {
   FakeAudioContext,
   FakeGainNode,
@@ -307,5 +308,92 @@ describe('AudioPlayer', () => {
 
     player.fadeTo(1, 0.012);
     expect(master.gain.ramps.at(-1)?.value).toBe(0.8);
+  });
+
+  it('never lets song time step back when a fresh output stamp lands behind the estimate', async () => {
+    const { player } = await makePlayer();
+
+    context.currentTime = 10;
+    await player.start(2);
+    context.outputLatency = 0.05;
+    context.currentTime = 10.3;
+    // No stamp yet: the clock minus latency, 10.25.
+    expect(player.currentTime).toBeCloseTo(2.25, 6);
+
+    vi.spyOn(performance, 'now').mockReturnValue(5010);
+    Object.assign(context, {
+      // A fresh stamp puts the audible time at 10.21: behind the 10.25 shown.
+      getOutputTimestamp: () => ({ contextTime: 10.2, performanceTime: 5000 }),
+    });
+    expect(player.currentTime).toBeCloseTo(2.25, 6);
+
+    context.currentTime = 10.4;
+    vi.spyOn(performance, 'now').mockReturnValue(5100);
+    expect(player.currentTime).toBeCloseTo(2.3, 6);
+  });
+
+  describe('freeze and thaw', () => {
+    beforeEach(() => {
+      vi.spyOn(log, 'error').mockImplementation(() => {});
+    });
+
+    it('suspends and resumes the context', async () => {
+      const { player } = await makePlayer();
+
+      await expect(player.freeze()).resolves.toBe('frozen');
+      expect(context.state).toBe('suspended');
+      await expect(player.thaw()).resolves.toBe('resumed');
+      expect(context.state).toBe('running');
+      expect(log.error).not.toHaveBeenCalled();
+    });
+
+    it('names a rejected suspend or resume and logs the browser error', async () => {
+      const { player } = await makePlayer();
+      const error = new DOMException('device lost', 'InvalidStateError');
+
+      context.suspend.mockImplementation(() => Promise.reject(error));
+      context.resume.mockImplementation(() => Promise.reject(error));
+
+      await expect(player.freeze()).resolves.toBe('failed');
+      await expect(player.thaw()).resolves.toBe('failed');
+      expect(log.error).toHaveBeenCalledWith(
+        'audio.resume_failed',
+        expect.objectContaining({ outcome: 'failed' }),
+        error,
+      );
+    });
+
+    it('stops waiting on a resume that never settles', async () => {
+      const { player } = await makePlayer();
+
+      vi.useFakeTimers();
+
+      try {
+        context.resume.mockImplementation(() => new Promise(() => {}));
+
+        const thawed = player.thaw();
+
+        await vi.advanceTimersByTimeAsync(2000);
+        await expect(thawed).resolves.toBe('timed-out');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fails a start whose context will not resume', async () => {
+      const { player } = await makePlayer();
+
+      context.state = 'suspended';
+      context.resume.mockImplementation(() =>
+        Promise.reject(new DOMException('blocked', 'NotAllowedError')),
+      );
+
+      await expect(player.start(0)).rejects.toThrow(
+        'audio context did not resume: failed',
+      );
+      expect(context.bufferSources.every((s) => s.starts.length === 0)).toBe(
+        true,
+      );
+    });
   });
 });

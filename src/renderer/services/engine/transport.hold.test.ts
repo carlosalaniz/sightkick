@@ -14,6 +14,7 @@ import {
 } from '../audio-player/test-support';
 import { Measure, ParsedChart } from '../../../chart-parser/types';
 import { Transport } from './transport';
+import { log } from '../../../shared/log';
 import { HOLD_FADE_SECONDS } from './constants';
 
 // Wait mode's hold over the real DefaultAudioPlayer on a fake AudioContext:
@@ -136,6 +137,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('Transport wait-mode hold over the real player', () => {
@@ -281,5 +283,122 @@ describe('Transport wait-mode hold over the real player', () => {
 
     expect(fadeIn?.value).toBe(1);
     expect(fadeIn?.time).toBeCloseTo(startAt + HOLD_FADE_SECONDS, 6);
+  });
+});
+
+describe('Transport when the audio clock misbehaves', () => {
+  beforeEach(() => {
+    vi.spyOn(log, 'error').mockImplementation(() => {});
+  });
+
+  it('parks at the frozen time and reports it when the resume after a hold fails', async () => {
+    const { transport, master, onError } = await setup();
+
+    await playTo(transport, 2);
+    await holdUntilFrozen(transport);
+    context.resume.mockImplementation(() =>
+      Promise.reject(new DOMException('device lost', 'InvalidStateError')),
+    );
+
+    transport.release();
+    await flush();
+
+    expect(onError).toHaveBeenCalledWith('resume');
+    expect(log.error).toHaveBeenCalledWith(
+      'transport.release_failed',
+      expect.objectContaining({ result: 'failed' }),
+    );
+    expect(transport.getSnapshot().state).toBe('parked');
+    expect(transport.isHeld).toBe(false);
+    expect(transport.timeStore.get()).toBeCloseTo(2, 6);
+    expect(master.gain.value).toBe(1);
+  });
+
+  it('parks and suspends again when the resume after a hold never settles', async () => {
+    const { transport, onError } = await setup();
+
+    await playTo(transport, 2);
+    await holdUntilFrozen(transport);
+
+    const resumes = deferResumes();
+
+    transport.release();
+    vi.advanceTimersByTime(2000);
+    await flush();
+
+    expect(onError).toHaveBeenCalledWith('resume');
+    expect(log.error).toHaveBeenCalledWith(
+      'transport.release_failed',
+      expect.objectContaining({ result: 'timed-out' }),
+    );
+    expect(transport.getSnapshot().state).toBe('parked');
+
+    // The resume lands late. The pause suspended again after it (a browser
+    // runs them in order), so nothing new is asked of the clock.
+    const suspends = context.suspend.mock.calls.length;
+
+    resumes[0]();
+    await flush();
+    expect(context.suspend.mock.calls.length).toBe(suspends);
+    expect(context.suspend).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets the song play on when the clock will not stop for a hold', async () => {
+    const { transport, master, onError } = await setup();
+
+    await playTo(transport, 2);
+    context.suspend.mockImplementation(() =>
+      Promise.reject(new DOMException('nope', 'InvalidStateError')),
+    );
+    await holdUntilFrozen(transport);
+
+    expect(log.error).toHaveBeenCalledWith(
+      'transport.hold_failed',
+      expect.objectContaining({ result: 'failed' }),
+    );
+    expect(transport.isHeld).toBe(false);
+    expect(transport.getSnapshot().isPlaying).toBe(true);
+    expect(master.gain.ramps.at(-1)?.value).toBe(1);
+    expect(onError).not.toHaveBeenCalled();
+
+    context.currentTime = 2.5;
+    flushFrame();
+    expect(transport.timeStore.get()).toBeCloseTo(2.5, 6);
+  });
+
+  it('parks and reports it when the clock will not start for play', async () => {
+    const { transport, player, onError } = await setup();
+
+    context.state = 'suspended';
+    context.resume.mockImplementation(() =>
+      Promise.reject(new DOMException('blocked', 'NotAllowedError')),
+    );
+    transport.playFromTick(0);
+    await flush();
+
+    expect(onError).toHaveBeenCalledWith('start');
+    expect(transport.getSnapshot().state).toBe('parked');
+    expect((player as DefaultAudioPlayer).isInitialised).toBe(false);
+  });
+
+  it('reports a failed start out of a hold through the start error path', async () => {
+    const { transport, master, onError } = await setup();
+
+    await playTo(transport, 2);
+    await holdUntilFrozen(transport);
+    context.resume.mockImplementation(() =>
+      Promise.reject(new DOMException('device lost', 'InvalidStateError')),
+    );
+
+    transport.seekSeconds(1);
+    await flush();
+
+    expect(onError).toHaveBeenCalledWith('start');
+    expect(log.error).toHaveBeenCalledWith(
+      'transport.start_failed',
+      expect.objectContaining({ songTime: 1 }),
+      expect.any(Error),
+    );
+    expect(master.gain.value).toBe(1);
   });
 });

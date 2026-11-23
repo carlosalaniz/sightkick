@@ -12,8 +12,45 @@ import { Measure, ParsedChart, RenderData } from '../../chart-parser/types';
 import { InputMapping, ScoreData } from '../../types';
 import { PlayheadStyle } from '../types';
 import { PlayerMode } from '../services/audio-player';
-import { Engine, PlaybackSnapshot, PlaybackState } from '../services/engine';
+import {
+  Engine,
+  PlaybackFailure,
+  PlaybackSnapshot,
+  PlaybackState,
+} from '../services/engine';
 import { inputBus } from '../input';
+import { assertNever } from '../../shared/assertNever';
+
+function failureMessage(failure: PlaybackFailure): {
+  title: string;
+  description: string;
+} {
+  switch (failure) {
+    case 'load':
+      return {
+        title: 'Audio failed to load',
+        description:
+          'One or more audio tracks could not be loaded for this song.',
+      };
+
+    case 'start':
+      return {
+        title: 'Audio failed to start',
+        description:
+          'The song could not start playing. Try pressing play again.',
+      };
+
+    case 'resume':
+      return {
+        title: 'Audio stopped',
+        description:
+          'The audio did not start again after waiting, so the song was paused. Press play to carry on.',
+      };
+
+    default:
+      return assertNever(failure, 'playback failure');
+  }
+}
 
 interface UseEngineParams {
   trackData: TrackConfig[];
@@ -112,11 +149,9 @@ export function useEngine({
       player: playerRef.current,
       subscribeInput: inputBus.subscribe,
       onEnded: (score) => onEndedRef.current(score),
-      onError: () =>
+      onError: (failure) =>
         notification.error({
-          title: 'Audio failed to load',
-          description:
-            'One or more audio tracks could not be loaded for this song.',
+          ...failureMessage(failure),
           placement: 'bottomRight',
         }),
     });

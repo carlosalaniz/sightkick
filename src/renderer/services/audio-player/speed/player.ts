@@ -204,12 +204,16 @@ export class SpeedAudioPlayer
 
     await this.prepared;
 
-    if (this.context.state === 'suspended') {
-      await this.context.resume().catch(() => {});
-    }
+    const thawed =
+      this.context.state === 'suspended' ? await this.thaw() : 'resumed';
 
     if (epoch !== this.epoch) {
       return;
+    }
+
+    // Chunks scheduled on a context that isn't running would never play.
+    if (thawed !== 'resumed') {
+      throw new Error(`audio context did not resume: ${thawed}`);
     }
 
     const speed = this._playbackSpeed;

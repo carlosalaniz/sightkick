@@ -22,6 +22,7 @@ const { MockAudioPlayer } = vi.hoisted(() => {
     currentTime: 0,
     destination: {},
     resume: () => Promise.resolve(),
+    suspend: () => Promise.resolve(),
     createGain: () => ({
       gain: {
         value: 0,
@@ -59,6 +60,8 @@ const { MockAudioPlayer } = vi.hoisted(() => {
       this.currentTime = offset;
     });
     pause = vi.fn();
+    freeze = vi.fn(() => Promise.resolve('frozen' as const));
+    thaw = vi.fn(() => Promise.resolve('resumed' as const));
     stop = vi.fn();
     setMasterVolume = vi.fn();
     setPlaybackSpeed = vi.fn();

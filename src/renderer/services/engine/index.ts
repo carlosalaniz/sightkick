@@ -7,6 +7,7 @@ export type {
   JudgedHit,
   JudgedHitHandler,
   LoopRegion,
+  PlaybackFailure,
   PlaybackSnapshot,
   PlaybackState,
 } from './types';

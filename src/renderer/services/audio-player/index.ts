@@ -2,8 +2,10 @@ export type {
   AudioPlayer,
   AudioPlayerFactory,
   AudioTrackHandle,
+  FreezeResult,
   LoopWindow,
   SpeedControllableAudioPlayer,
+  ThawResult,
   TrackConfig,
 } from './types';
 

@@ -9,13 +9,22 @@ import { PlayheadStyle } from '../../types';
 import { InputEvent } from '../../input/types';
 import { AudioPlayerFactory, PlayerMode, TrackConfig } from '../audio-player';
 
+/**
+ * Why the song can't play, for the message the user sees:
+ * - load: its audio failed to load.
+ * - start: the audio failed to start.
+ * - resume: the audio clock didn't run again after a wait-mode hold, so the
+ *   song was paused where it stood.
+ */
+export type PlaybackFailure = 'load' | 'start' | 'resume';
+
 export interface EngineOptions {
   trackData: TrackConfig[];
   isDev: boolean;
   player: PlayerMode;
   subscribeInput: (listener: (event: InputEvent) => void) => () => void;
   onEnded: (score: ScoreData) => void;
-  onError: () => void;
+  onError: (failure: PlaybackFailure) => void;
 }
 
 export interface EngineContext {
@@ -130,6 +139,6 @@ export interface TransportOptions {
   isDev: boolean;
   createPlayer: AudioPlayerFactory;
   onEnded: () => void;
-  onError: () => void;
+  onError: (failure: PlaybackFailure) => void;
   onSeek?: (tick: number) => void;
 }

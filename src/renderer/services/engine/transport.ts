@@ -4,6 +4,7 @@ import {
   AudioPlayerFactory,
   isSpeedControllable,
   SpeedControllableAudioPlayer,
+  ThawResult,
   TrackConfig,
 } from '../audio-player';
 import { TimeStore } from '../time-store';
@@ -16,6 +17,7 @@ import {
 import { Beat, getBeatGrid, getCountInInfo } from '../beat-grid';
 import {
   LoopRegion,
+  PlaybackFailure,
   PlaybackSnapshot,
   PlaybackState,
   TransportContext,
@@ -30,6 +32,7 @@ import {
   SNAPSHOT_KEYS,
 } from './constants';
 import { assertNever } from '../../../shared/assertNever';
+import { log } from '../../../shared/log';
 
 /**
  * How far behind the frozen time a resumed song may read and still count as
@@ -70,7 +73,7 @@ export class Transport {
   readonly timeStore = new TimeStore();
   private isDev: boolean;
   private onEndedCb: () => void;
-  private onErrorCb: () => void;
+  private onErrorCb: (failure: PlaybackFailure) => void;
   private onSeekCb: (tick: number) => void;
   private chart: ParsedChart | undefined;
   private hitToleranceSeconds = HIT_TOLERANCE_SECONDS;
@@ -329,7 +332,14 @@ export class Transport {
   }
 
   private startAudio(...args: [offset: number, startAt?: number]): void {
-    Promise.resolve(this.audioPlayer?.start(...args)).catch(this.onErrorCb);
+    Promise.resolve(this.audioPlayer?.start(...args)).catch((error) =>
+      this.handleStartFailed(args[0], error),
+    );
+  }
+
+  private handleStartFailed(songTime: number, error: unknown): void {
+    log.error('transport.start_failed', { songTime }, error);
+    this.onErrorCb('start');
   }
 
   private async beginPlayback(
@@ -342,12 +352,20 @@ export class Transport {
     }
 
     const ctx = this.audioPlayer.context;
-
-    if (ctx.state === 'suspended') {
-      await ctx.resume().catch(() => {});
-    }
+    const thawed =
+      ctx.state === 'suspended' ? await this.audioPlayer.thaw() : 'resumed';
 
     if (this.disposed || generation !== this.playGeneration) {
+      return;
+    }
+
+    if (thawed !== 'resumed') {
+      // Nothing scheduled on a stopped clock would ever play or count in.
+      log.error('transport.start_failed', { songTime: startTime, thawed });
+      this.state = 'parked';
+      this.emit();
+      this.onErrorCb('start');
+
       return;
     }
 
@@ -489,12 +507,53 @@ export class Transport {
     // Never behind the time already shown: a step back reads as a rewind.
     const live = this.audioPlayer.currentTime;
     const shown = this.position;
-
-    this.holdState = {
+    const frozen: HoldState = {
       kind: 'frozen',
       at: at ?? (live < shown && shown - live < SETTLE_SECONDS ? shown : live),
     };
-    void this.audioPlayer.context.suspend().catch(() => {});
+    const player = this.audioPlayer;
+
+    this.holdState = frozen;
+    void player.freeze().then((result) => {
+      // Released, paused or seeked since: that decided the state already.
+      if (this.holdState !== frozen) {
+        return;
+      }
+
+      switch (result) {
+        case 'frozen':
+          return;
+
+        case 'failed':
+          this.handleFreezeFailed(player, frozen.at, result);
+
+          return;
+
+        case 'timed-out':
+          this.handleFreezeFailed(player, frozen.at, result);
+
+          return;
+
+        default:
+          assertNever(result, 'freeze result');
+      }
+    });
+  }
+
+  /**
+   * The clock wouldn't stop: let the song play on rather than claim a hold
+   * that isn't there. Resuming undoes a suspend that lands late.
+   */
+  private handleFreezeFailed(
+    player: AudioPlayer,
+    songTime: number,
+    result: 'failed' | 'timed-out',
+  ): void {
+    log.error('transport.hold_failed', { songTime, result });
+    this.holdState = FREE;
+    void player.thaw();
+    player.fadeTo?.(1, HOLD_FADE_SECONDS);
+    this.flushPendingSpeed();
   }
 
   release(): void {
@@ -534,10 +593,9 @@ export class Transport {
         const attempt = this.resumeAttempt;
 
         this.holdState = { kind: 'resuming', at: hold.at, attempt };
-        void player.context
-          .resume()
-          .catch(() => {})
-          .then(() => this.handleResumed(attempt));
+        void player
+          .thaw()
+          .then((result) => this.handleResumed(attempt, result));
 
         return;
       }
@@ -547,7 +605,7 @@ export class Transport {
     }
   }
 
-  private handleResumed(attempt: number): void {
+  private handleResumed(attempt: number, result: ThawResult): void {
     const hold = this.holdState;
 
     // A new hold, pause or seek came first: this resume is stale.
@@ -555,11 +613,43 @@ export class Transport {
       return;
     }
 
-    // `at` stays until the live time catches up with it (see heldTime), so
-    // the song never steps back on release.
-    this.holdState = { kind: 'settling', at: hold.at };
-    this.flushPendingSpeed();
-    this.audioPlayer?.fadeTo?.(1, HOLD_FADE_SECONDS);
+    switch (result) {
+      case 'resumed':
+        // `at` stays until the live time catches up with it (see heldTime),
+        // so the song never steps back on release.
+        this.holdState = { kind: 'settling', at: hold.at };
+        this.flushPendingSpeed();
+        this.audioPlayer?.fadeTo?.(1, HOLD_FADE_SECONDS);
+
+        return;
+
+      case 'failed':
+        this.handleResumeFailed(hold.at, result);
+
+        return;
+
+      case 'timed-out':
+        this.handleResumeFailed(hold.at, result);
+
+        return;
+
+      default:
+        assertNever(result, 'thaw result');
+    }
+  }
+
+  /**
+   * The clock wouldn't run again: the song can't carry on, so park it where
+   * it froze (as a pause would) and say so. Pausing also suspends again, so
+   * a resume that lands late doesn't play a parked song.
+   */
+  private handleResumeFailed(
+    songTime: number,
+    result: 'failed' | 'timed-out',
+  ): void {
+    log.error('transport.release_failed', { songTime, result });
+    this.pause();
+    this.onErrorCb('resume');
   }
 
   /** Ends a hold for a new start, seek or pause, which set their own time. */
@@ -717,9 +807,7 @@ export class Transport {
         )
         .catch((error) => {
           player.fadeTo?.(1, 0);
-          this.onErrorCb();
-
-          return error;
+          this.handleStartFailed(seconds, error);
         });
     } else {
       this.startAudio(seconds);
@@ -818,12 +906,13 @@ export class Transport {
         this.syncPlayerLoop();
         this.emit();
       })
-      .catch(() => {
+      .catch((error) => {
         if (this.disposed) {
           return;
         }
 
-        this.onErrorCb();
+        log.error('transport.load_failed', {}, error);
+        this.onErrorCb('load');
       });
   }
 
