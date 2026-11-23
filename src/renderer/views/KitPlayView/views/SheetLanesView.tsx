@@ -7,9 +7,15 @@ import {
   faEye,
   faRotateLeft,
 } from '@fortawesome/free-solid-svg-icons';
+import { assertNever } from '../../../../shared/assertNever';
 import { usePersisted } from '../../../hooks/usePersisted';
 import { TimelineNote, VOICES } from '../../../kit';
-import { usePadStrikes, useAnimationFrame, useNoteJudgments } from '../hooks';
+import {
+  useAnimationFrame,
+  useMirror,
+  useNoteJudgments,
+  usePadStrikes,
+} from '../hooks';
 import { PlaySession } from '../session';
 import {
   coachBand,
@@ -50,6 +56,7 @@ import {
   GuideBars,
   Panel,
   PassReport,
+  PassReportStats,
   ReadingProgress,
   SongProgress,
   SummaryPanel,
@@ -75,9 +82,12 @@ import {
   mean,
   MISS_COLOR,
   NoteResult,
+  PassMode,
   passOutcome,
+  passSpeed,
+  PassStats,
   readingBonus,
-  RUNGS,
+  SHEET_ONLY,
   START_RUNG,
   streakAfterHit,
   streakAfterMiss,
@@ -102,10 +112,6 @@ interface Runtime {
   logs: Map<string, number[]>;
   lastTime: number;
   wasPlaying: boolean;
-  /** The current pass is an unseen-bars pass (sheet only, 100%). */
-  probe: boolean;
-  guide: GuideMode;
-  ladder: LadderState;
   passCount: number;
   /** Last written DOM values, to skip no-op writes. */
   dom: Map<Element, Map<string, string>>;
@@ -150,11 +156,12 @@ function setAttr(rt: Runtime, el: Element | null, name: string, v: string) {
 
 export function SheetLanesView({ session }: { session: PlaySession }) {
   const { bars, notes, engine, kit, pieceByVoice, setPlaybackSpeed } = session;
-  const [guideSetting, setGuide] = usePersisted<GuideMode>(
+  const [guideSetting, setGuideSetting] = usePersisted<GuideMode>(
     'settings.v6.guide',
     'adaptive',
   );
   const guide = isGuideMode(guideSetting) ? guideSetting : 'adaptive';
+  const [guideRef, setGuide] = useMirror(guide, setGuideSetting);
   const [motionSetting, setMotion] = usePersisted<Motion>(
     'settings.v6.view',
     'scroll',
@@ -180,12 +187,17 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
   const [spacing, setSpacing] = useState(() =>
     laneSpacing(initialLevels(guide, range.end - range.start)),
   );
-  const [ladder, setLadder] = useState<LadderState>({
+  const [ladder, setLadderState] = useState<LadderState>({
     index: START_RUNG,
     clean: 0,
     fails: 0,
   });
-  const [probe, setProbe] = useState(false);
+  // The ladder, the pass mode and the guide setting each have one writer
+  // (the setter from useMirror), which keeps the refs that frame and input
+  // callbacks read equal to the rendered state.
+  const [ladderRef, setLadder] = useMirror(ladder, setLadderState);
+  const [mode, setModeState] = useState<PassMode>('practice');
+  const [modeRef, setMode] = useMirror(mode, setModeState);
   const [report, setReport] = useState<PassReport>();
   const [coach, setCoach] = useState<CoachReport<string>>();
   const [reduced] = useState(prefersReducedMotion);
@@ -200,9 +212,6 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
     logs: new Map(),
     lastTime: -Infinity,
     wasPlaying: false,
-    probe: false,
-    guide,
-    ladder,
     passCount: 0,
     dom: new Map(),
   });
@@ -216,7 +225,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
   const guideBarEls = useRef<(HTMLElement | null)[]>([]);
   const geo = useMemo(() => staffGeometry(spacing), [spacing]);
   const ppb = pixelsPerBeat(motion, look);
-  const speed = probe ? 1 : RUNGS[ladder.index];
+  const speed = passSpeed(mode, ladder);
   const pieceOf = useCallback(
     (note: TimelineNote) => pieceByVoice.get(note.voice),
     [pieceByVoice],
@@ -255,10 +264,6 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
 
   useEffect(() => () => engine.setLoopRegion(undefined), [engine]);
 
-  useEffect(() => {
-    rt.current.guide = guide;
-  }, [guide]);
-
   const statusOf = useCallback(
     (pass: number, id: string) => rt.current.results.get(pass)?.get(id),
     [],
@@ -283,29 +288,28 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
   }, [model, geo, ppb, pieceByVoice]);
 
   /** Resets everything that belongs to a loop and switches to `next`. */
-  const switchRange = (next: BarRange, asProbe: boolean) => {
+  const switchRange = (next: BarRange, nextMode: PassMode) => {
     const r = rt.current;
     const count = next.end - next.start;
 
-    r.levels = asProbe
+    r.levels = SHEET_ONLY[nextMode]
       ? Array.from({ length: count }, () => 0)
-      : initialLevels(r.guide, count);
+      : initialLevels(guideRef.current, count);
     r.pass = 0;
     r.passFrom = session.timeStore.get();
     r.results.clear();
     r.score = 0;
-    r.probe = asProbe;
-    setProbe(asProbe);
+    setMode(nextMode);
     setSpacing(laneSpacing(r.levels));
     setRange(next);
   };
-  const pickRange = (next: BarRange) => switchRange(next, false);
+  const pickRange = (next: BarRange) => switchRange(next, 'practice');
   const startUnseen = () => {
     const from = Math.max(range.end, progress.seenTo ?? 0);
     const next = nextRangeWithNotes(notes, from, bars.length);
 
     if (next) {
-      switchRange(next, true);
+      switchRange(next, 'unseenProbe');
     }
   };
   const unseenAvailable =
@@ -314,18 +318,18 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
       Math.max(range.end, progress.seenTo ?? 0),
       bars.length,
     ) !== undefined;
-  const changeGuide = (mode: GuideMode) => {
+  const changeGuide = (next: GuideMode) => {
     const r = rt.current;
-    const level = presetLevel(mode);
+    const level = presetLevel(next);
+    const sheetOnly = SHEET_ONLY[modeRef.current];
 
-    setGuide(mode);
-    r.guide = mode;
+    setGuide(next);
 
-    if (level !== undefined && !r.probe) {
+    if (level !== undefined && !sheetOnly) {
       r.levels = r.levels.map(() => level);
     }
 
-    setSpacing(laneSpacing(r.probe ? [0] : r.levels));
+    setSpacing(laneSpacing(sheetOnly ? [0] : r.levels));
   };
   const restart = () => {
     const r = rt.current;
@@ -335,10 +339,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
     session.playFromTick(model.startTick);
   };
   const pickRung = (index: number) => {
-    const next = { index, clean: 0, fails: 0 };
-
-    rt.current.ladder = next;
-    setLadder(next);
+    setLadder({ index, clean: 0, fails: 0 });
   };
   const recordMiss = (note: TimelineNote, pass: number) => {
     const r = rt.current;
@@ -356,7 +357,11 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
     r.results.set(pass, map);
     r.streak = streakAfterMiss(r.streak);
 
-    if (!r.probe && r.guide === 'adaptive' && r.levels[j] !== undefined) {
+    if (
+      !SHEET_ONLY[modeRef.current] &&
+      guideRef.current === 'adaptive' &&
+      r.levels[j] !== undefined
+    ) {
       r.levels[j] = fadeAfterMiss(r.levels[j]);
     }
 
@@ -388,15 +393,16 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
       const tier = gradeHit(offsetMs);
       const result: NoteResult = { tier, offsetMs };
       const j = note.measureIdx - model.range.start;
-      const level = r.probe ? 0 : r.levels[j] ?? 1;
+      const sheetOnly = SHEET_ONLY[modeRef.current];
+      const level = sheetOnly ? 0 : r.levels[j] ?? 1;
 
       map.set(note.id, result);
       r.results.set(pass, map);
       r.streak = streakAfterHit(r.streak);
       r.score += hitPoints(tier, r.streak.mult, level);
 
-      if (!r.probe) {
-        if (r.guide === 'adaptive' && r.levels[j] !== undefined) {
+      if (!sheetOnly) {
+        if (guideRef.current === 'adaptive' && r.levels[j] !== undefined) {
           r.levels[j] = fadeAfterHit(r.levels[j], tier);
         }
 
@@ -450,72 +456,95 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
 
     const stats = evaluatePass(results);
     const tempo = session.playbackSpeed;
+    const passMode = modeRef.current;
     const base = {
       ...stats,
       range: model.range,
       tempo,
       score: r.score,
-      bonus: r.probe ? 2 : readingBonus(mean(r.levels)),
+      // A sheet-only pass reads with no guide at all: the full bonus.
+      bonus: readingBonus(SHEET_ONLY[passMode] ? 0 : mean(r.levels)),
     };
     const seenTo = Math.max(progress.seenTo ?? 0, model.range.end);
 
     r.score = 0;
 
-    if (r.probe) {
-      r.probe = false;
-      setProbe(false);
+    switch (passMode) {
+      case 'unseenProbe':
+        endProbePass(stats, tempo, seenTo, base);
 
-      const level = presetLevel(r.guide);
+        return;
 
-      if (level !== undefined) {
-        r.levels = r.levels.map(() => level);
-      }
+      case 'practice':
+        endPracticePass(stats, tempo, seenTo, base);
 
-      setAllProgress((all) => {
-        const prev = all[songId] ?? EMPTY_PROGRESS;
+        return;
 
-        return {
-          ...all,
-          [songId]: {
-            ...prev,
-            seenTo: Math.max(prev.seenTo ?? 0, seenTo),
-            probes: [
-              {
-                at: Date.now(),
-                start: model.range.start,
-                end: model.range.end,
-                accuracy: stats.accuracy,
-                sdMs: stats.sdMs,
-                tempo,
-              },
-              ...prev.probes,
-            ].slice(0, 8),
-          },
-        };
-      });
-      setReport({
-        ...base,
-        pass: undefined,
-        verdict:
-          'Logged in Reading progress. Practice continues on these bars; misses bring the guide back.',
-        good: true,
-      });
-      setSpacing(laneSpacing(r.levels));
-
-      return;
+      default:
+        assertNever(passMode, 'pass mode');
     }
+  };
+  /** An unseen-bars pass ended: log it in Reading progress and go back to practice. */
+  const endProbePass = (
+    stats: PassStats,
+    tempo: number,
+    seenTo: number,
+    base: PassReportStats,
+  ) => {
+    const r = rt.current;
+
+    setMode('practice');
+
+    const level = presetLevel(guideRef.current);
+
+    if (level !== undefined) {
+      r.levels = r.levels.map(() => level);
+    }
+
+    setAllProgress((all) => {
+      const prev = all[songId] ?? EMPTY_PROGRESS;
+
+      return {
+        ...all,
+        [songId]: {
+          ...prev,
+          seenTo: Math.max(prev.seenTo ?? 0, seenTo),
+          probes: [
+            {
+              at: Date.now(),
+              start: model.range.start,
+              end: model.range.end,
+              accuracy: stats.accuracy,
+              sdMs: stats.sdMs,
+              tempo,
+            },
+            ...prev.probes,
+          ].slice(0, 8),
+        },
+      };
+    });
+    setReport({ ...base, mode: 'unseenProbe' });
+    setSpacing(laneSpacing(r.levels));
+  };
+  /** A practice pass ended: move the ladder, coach, and record progress. */
+  const endPracticePass = (
+    stats: PassStats,
+    tempo: number,
+    seenTo: number,
+    base: PassReportStats,
+  ) => {
+    const r = rt.current;
 
     r.passCount += 1;
 
-    const step = ladderStep(r.ladder, passOutcome(stats));
+    const step = ladderStep(ladderRef.current, passOutcome(stats));
 
-    r.ladder = step.state;
     setLadder(step.state);
     setReport({
       ...base,
+      mode: 'practice',
       pass: r.passCount,
-      verdict: step.verdict,
-      good: step.good,
+      move: step.move,
     });
 
     const sixteenthMs = (model.beatSeconds / 4 / tempo) * 1000;
@@ -551,10 +580,9 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
     r.score = 0;
 
     // A seek into the middle of an unseen-bars pass spoils it.
-    if (r.probe && now > model.start + 0.3) {
-      r.probe = false;
-      setProbe(false);
-      r.levels = initialLevels(r.guide, r.levels.length);
+    if (modeRef.current === 'unseenProbe' && now > model.start + 0.3) {
+      setMode('practice');
+      r.levels = initialLevels(guideRef.current, r.levels.length);
       setSpacing(laneSpacing(r.levels));
     }
   };
@@ -593,7 +621,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
 
     s.ensure(curV - 1, curV + look + 1, statusOf);
 
-    const bare = r.probe;
+    const bare = SHEET_ONLY[modeRef.current];
     const rate = session.playbackSpeed || 1;
 
     s.paint({
@@ -734,7 +762,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
           <Tooltip title="Loop the next bars you haven't played, sheet only, at 100%, and log that first pass in Reading progress">
             <Button
               icon={<FontAwesomeIcon icon={faEye} />}
-              disabled={probe || !unseenAvailable}
+              disabled={mode === 'unseenProbe' || !unseenAvailable}
               onClick={startUnseen}
             >
               Next unseen bars
@@ -798,7 +826,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
             }}
           >
             <div className="absolute top-2 right-2.5 flex gap-1.5 pointer-events-none">
-              {probe && (
+              {mode === 'unseenProbe' && (
                 <span className="font-semibold text-[12px] rounded-full px-2.5 py-[3px] bg-[#c4402a] text-[#f2ede1]">
                   Unseen bars · sheet only · 100%
                 </span>

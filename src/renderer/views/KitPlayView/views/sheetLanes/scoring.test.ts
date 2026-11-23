@@ -4,6 +4,7 @@ import {
   gradeHit,
   hitPoints,
   ladderStep,
+  ladderVerdict,
   NoteResult,
   passOutcome,
   RUNGS,
@@ -82,29 +83,49 @@ describe('ladderStep', () => {
     const one = ladderStep(at(2), 'clean');
 
     expect(one.state).toEqual(at(2, 1, 0));
-    expect(one.verdict).toBe('Clean pass. One more moves you to 85%.');
+    expect(one.move).toEqual({ kind: 'oneClean', nextIndex: 3 });
+    expect(ladderVerdict(one.move).text).toBe(
+      'Clean pass. One more moves you to 85%.',
+    );
 
     const two = ladderStep(one.state, 'clean');
 
     expect(two.state).toEqual(at(3));
-    expect(two.verdict).toBe('Two clean passes. Tempo up to 85%.');
-    expect(two.good).toBe(true);
+    expect(ladderVerdict(two.move)).toEqual({
+      text: 'Two clean passes. Tempo up to 85%.',
+      good: true,
+    });
   });
 
   it('goes down after two clear fails and never below the first rung', () => {
     const one = ladderStep(at(2), 'fail');
 
     expect(one.state).toEqual(at(2, 0, 1));
+    expect(one.move.kind).toBe('oneRough');
 
-    expect(ladderStep(one.state, 'fail').state).toEqual(at(1));
-    expect(ladderStep(at(0, 0, 1), 'fail').state.index).toBe(0);
+    const two = ladderStep(one.state, 'fail');
+
+    expect(two.state).toEqual(at(1));
+    expect(two.move).toEqual({ kind: 'down', index: 1 });
+    expect(ladderVerdict(two.move).good).toBe(false);
+
+    const bottom = ladderStep(at(0, 0, 1), 'fail');
+
+    expect(bottom.state.index).toBe(0);
+    expect(bottom.move.kind).toBe('roughAtBottom');
+    expect(ladderVerdict(bottom.move).text).toBe(
+      'Rough pass. This is already the slowest rung.',
+    );
   });
 
   it('stays on a close pass and resets both counters', () => {
     const s = ladderStep(at(4, 1, 0), 'close');
 
     expect(s.state).toEqual(at(4));
-    expect(s.verdict).toBe('Close. Staying at 90%.');
+    expect(ladderVerdict(s.move)).toEqual({
+      text: 'Close. Staying at 90%.',
+      good: false,
+    });
   });
 
   it('a fail between clean passes breaks the clean run', () => {
@@ -117,7 +138,11 @@ describe('ladderStep', () => {
     const top = RUNGS.length - 1;
 
     expect(RUNGS[top]).toBe(1.1);
-    expect(ladderStep(at(top, 1), 'clean').state.index).toBe(top);
+
+    const s = ladderStep(at(top, 1), 'clean');
+
+    expect(s.state.index).toBe(top);
+    expect(s.move.kind).toBe('cleanAtTop');
   });
 });
 

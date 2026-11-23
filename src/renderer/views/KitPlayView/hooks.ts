@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { RefObject, useCallback, useEffect, useRef } from 'react';
 import { inputBus } from '../../input';
 import {
   firstNoteAtOrAfter,
@@ -8,6 +8,28 @@ import {
 } from '../../kit';
 import { JudgedHit } from '../../services/engine';
 import { PlaySession } from './session';
+
+/**
+ * A ref that animation-frame and input callbacks read, kept equal to a piece
+ * of React state by being its only writer: the returned setter writes the ref
+ * first, then the state. Use it instead of setting a ref and its state in
+ * pairs, which drift apart as soon as one call site forgets the other.
+ */
+export function useMirror<T>(
+  value: T,
+  setValue: (next: T) => void,
+): readonly [RefObject<T>, (next: T) => void] {
+  const ref = useRef(value);
+  const set = useCallback(
+    (next: T) => {
+      ref.current = next;
+      setValue(next);
+    },
+    [setValue],
+  );
+
+  return [ref, set];
+}
 
 /** Runs `callback(now)` every animation frame with the current audio time. */
 export function useAnimationFrame(

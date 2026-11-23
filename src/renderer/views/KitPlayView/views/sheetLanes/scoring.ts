@@ -5,6 +5,7 @@
  * playback speed. Pass and star limits are in `../shared/judging`.
  */
 
+import { assertNever } from '../../../../../shared/assertNever';
 import {
   SHEET_LANES_CLEAN_ACCURACY,
   SHEET_LANES_CLEAN_MAX_MISSES,
@@ -72,11 +73,19 @@ export const TIER_BY_ID = Object.fromEntries(
 
 export const MISS_COLOR = '#c62828';
 
-/** Every judged hit is inside the window, so anything past ±70 ms is `ok`. */
+/**
+ * Every judged hit is inside the window, so anything past ±70 ms is `ok`
+ * (its limit is unbounded). Only a NaN offset finds no tier: a bug.
+ */
 export function gradeHit(offsetMs: number): TierId {
   const abs = Math.abs(offsetMs);
+  const tier = TIERS.find((t) => abs <= t.limitMs);
 
-  return (TIERS.find((t) => abs <= t.limitMs) ?? TIERS[TIERS.length - 1]).id;
+  if (!tier) {
+    throw new Error(`No tier for a hit ${offsetMs} ms off`);
+  }
+
+  return tier.id;
 }
 
 /** Range label for a tier, e.g. `±40`; `ok` shows the hit window. */
@@ -146,6 +155,19 @@ export function evaluatePass(results: NoteResult[]): PassStats {
   };
 }
 
+/**
+ * What kind of pass is looping. `practice` climbs the tempo ladder with the
+ * adaptive guide; `unseenProbe` plays bars not seen before, sheet only at
+ * 100%, outside the ladder, and logs that first pass in Reading progress.
+ */
+export type PassMode = 'practice' | 'unseenProbe';
+
+/** Whether a pass of this mode hides every guide (lanes, colors, labels, kit hints). */
+export const SHEET_ONLY: Record<PassMode, boolean> = {
+  practice: false,
+  unseenProbe: true,
+};
+
 export type PassOutcome = 'clean' | 'fail' | 'close';
 
 /** Clean: few enough misses and accurate enough. Clear fail: under the rough limit. */
@@ -167,6 +189,20 @@ export const RUNGS = [0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1];
 
 export const START_RUNG = 2;
 
+/** Playback speed of a pass: the ladder's rung, or 100% for an unseen-bars probe. */
+export function passSpeed(mode: PassMode, ladder: LadderState): number {
+  switch (mode) {
+    case 'practice':
+      return RUNGS[ladder.index];
+
+    case 'unseenProbe':
+      return 1;
+
+    default:
+      return assertNever(mode, 'pass mode');
+  }
+}
+
 export interface LadderState {
   index: number;
   /** Clean passes in a row at this rung. */
@@ -175,13 +211,32 @@ export interface LadderState {
   fails: number;
 }
 
+/** What one pass did to the ladder, for the verdict line. */
+export type LadderMove =
+  /** Second clean pass in a row: up a rung, to `index`. */
+  | { kind: 'up'; index: number }
+  /** Second clean pass in a row on the top rung: nowhere higher to go. */
+  | { kind: 'cleanAtTop' }
+  /** First clean pass: one more moves to `nextIndex`. */
+  | { kind: 'oneClean'; nextIndex: number }
+  /** Second clear fail in a row: down a rung, to `index`. */
+  | { kind: 'down'; index: number }
+  /** First clear fail: another one drops the tempo. */
+  | { kind: 'oneRough' }
+  /** A clear fail on the slowest rung: nowhere lower to go. */
+  | { kind: 'roughAtBottom' }
+  /** Neither clean nor a clear fail: stay at `index`. */
+  | { kind: 'stay'; index: number };
+
 export interface LadderStep {
   state: LadderState;
-  verdict: string;
-  good: boolean;
+  move: LadderMove;
 }
 
 const pct = (i: number) => `${Math.round(RUNGS[i] * 100)}%`;
+
+/** Clean or rough passes in a row that move the ladder. */
+export const PASSES_TO_MOVE = 2;
 
 /** Two clean passes go up a rung, two clear fails go down, anything else stays. */
 export function ladderStep(
@@ -190,60 +245,102 @@ export function ladderStep(
 ): LadderStep {
   const top = RUNGS.length - 1;
 
-  if (outcome === 'clean') {
-    if (state.clean + 1 >= 2) {
+  switch (outcome) {
+    case 'clean': {
+      if (state.clean + 1 < PASSES_TO_MOVE) {
+        return {
+          state: { index: state.index, clean: state.clean + 1, fails: 0 },
+          move: { kind: 'oneClean', nextIndex: Math.min(state.index + 1, top) },
+        };
+      }
+
       if (state.index < top) {
         const index = state.index + 1;
 
         return {
           state: { index, clean: 0, fails: 0 },
-          verdict: `Two clean passes. Tempo up to ${pct(index)}.`,
-          good: true,
+          move: { kind: 'up', index },
         };
       }
 
       return {
         state: { index: state.index, clean: 0, fails: 0 },
-        verdict: 'Clean at the top over-speed rung.',
-        good: true,
+        move: { kind: 'cleanAtTop' },
       };
     }
 
-    return {
-      state: { index: state.index, clean: state.clean + 1, fails: 0 },
-      verdict: `Clean pass. One more moves you to ${pct(
-        Math.min(state.index + 1, top),
-      )}.`,
-      good: true,
-    };
-  }
+    case 'fail': {
+      if (state.fails + 1 >= PASSES_TO_MOVE && state.index > 0) {
+        const index = state.index - 1;
 
-  if (outcome === 'fail') {
-    if (state.fails + 1 >= 2 && state.index > 0) {
-      const index = state.index - 1;
+        return {
+          state: { index, clean: 0, fails: 0 },
+          move: { kind: 'down', index },
+        };
+      }
 
       return {
-        state: { index, clean: 0, fails: 0 },
-        verdict: `Two rough passes. Tempo down to ${pct(index)}.`,
-        good: false,
+        state: { index: state.index, clean: 0, fails: state.fails + 1 },
+        move: { kind: state.index > 0 ? 'oneRough' : 'roughAtBottom' },
       };
     }
 
-    return {
-      state: { index: state.index, clean: 0, fails: state.fails + 1 },
-      verdict:
-        state.index > 0
-          ? 'Rough pass. Another one drops the tempo.'
-          : 'Rough pass. This is already the slowest rung.',
-      good: false,
-    };
-  }
+    case 'close':
+      return {
+        state: { index: state.index, clean: 0, fails: 0 },
+        move: { kind: 'stay', index: state.index },
+      };
 
-  return {
-    state: { index: state.index, clean: 0, fails: 0 },
-    verdict: `Close. Staying at ${pct(state.index)}.`,
-    good: false,
-  };
+    default:
+      return assertNever(outcome, 'pass outcome');
+  }
+}
+
+/** The verdict line for a ladder move; `good` colors it green. */
+export function ladderVerdict(move: LadderMove): {
+  text: string;
+  good: boolean;
+} {
+  switch (move.kind) {
+    case 'up':
+      return {
+        text: `Two clean passes. Tempo up to ${pct(move.index)}.`,
+        good: true,
+      };
+
+    case 'cleanAtTop':
+      return { text: 'Clean at the top over-speed rung.', good: true };
+
+    case 'oneClean':
+      return {
+        text: `Clean pass. One more moves you to ${pct(move.nextIndex)}.`,
+        good: true,
+      };
+
+    case 'down':
+      return {
+        text: `Two rough passes. Tempo down to ${pct(move.index)}.`,
+        good: false,
+      };
+
+    case 'oneRough':
+      return {
+        text: 'Rough pass. Another one drops the tempo.',
+        good: false,
+      };
+
+    case 'roughAtBottom':
+      return {
+        text: 'Rough pass. This is already the slowest rung.',
+        good: false,
+      };
+
+    case 'stay':
+      return { text: `Close. Staying at ${pct(move.index)}.`, good: false };
+
+    default:
+      return assertNever(move, 'ladder move');
+  }
 }
 
 export interface StreakState {

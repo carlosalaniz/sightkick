@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { assertNever } from '../../../../../shared/assertNever';
 import { cn } from '../../../../cn';
 import { Stars } from '../../../../components/Stars';
 import { limitPercent, SHEET_LANES_ROUGH_ACCURACY } from '../shared/judging';
@@ -6,8 +7,11 @@ import { CoachReport, coachStatus, coachTip } from './coach';
 import { GuideMode } from './guide';
 import { BarRange, rangeLabel } from './region';
 import {
+  LadderMove,
   LadderState,
+  ladderVerdict,
   MISS_COLOR,
+  PASSES_TO_MOVE,
   PassStats,
   RUNGS,
   TIERS,
@@ -18,15 +22,47 @@ export const OK_COLOR = '#3fae6a';
 
 export const WARN_COLOR = '#d9a03a';
 
-export interface PassReport extends PassStats {
-  /** Practice pass number; undefined for an unseen-bars pass. */
-  pass: number | undefined;
+export interface PassReportStats extends PassStats {
   range: BarRange;
   tempo: number;
   score: number;
   bonus: number;
-  verdict: string;
-  good: boolean;
+}
+
+/** The last pass: a practice pass and its ladder move, or an unseen-bars probe. */
+export type PassReport = PassReportStats &
+  (
+    | { mode: 'practice'; pass: number; move: LadderMove }
+    | { mode: 'unseenProbe' }
+  );
+
+function reportTitle(report: PassReport): string {
+  switch (report.mode) {
+    case 'practice':
+      return `Pass ${report.pass} · ${Math.round(report.tempo * 100)}% tempo`;
+
+    case 'unseenProbe':
+      return `Unseen bars · ${rangeLabel(report.range)} · sheet only`;
+
+    default:
+      return assertNever(report, 'pass report');
+  }
+}
+
+function reportVerdict(report: PassReport): { text: string; good: boolean } {
+  switch (report.mode) {
+    case 'practice':
+      return ladderVerdict(report.move);
+
+    case 'unseenProbe':
+      return {
+        text: 'Logged in Reading progress. Practice continues on these bars; misses bring the guide back.',
+        good: true,
+      };
+
+    default:
+      return assertNever(report, 'pass report');
+  }
 }
 
 export interface ProbeEntry {
@@ -146,16 +182,11 @@ export function SummaryPanel({
     );
   }
 
-  const probe = report.pass === undefined;
+  const practice = report.mode === 'practice';
+  const verdict = reportVerdict(report);
 
   return (
-    <Panel
-      title={
-        probe
-          ? `Unseen bars · ${rangeLabel(report.range)} · sheet only`
-          : `Pass ${report.pass} · ${Math.round(report.tempo * 100)}% tempo`
-      }
-    >
+    <Panel title={reportTitle(report)}>
       <div className="flex items-center justify-between gap-3">
         <span className="font-display text-[40px] leading-none text-text tabular-nums">
           {Math.round(report.accuracy * 100)}%
@@ -177,18 +208,18 @@ export function SummaryPanel({
         ±{Math.round(report.sdMs)} ms · UR {Math.round(report.sdMs * 10)}
       </Stat>
       <Stat k="Average offset">{signed(report.meanMs)}</Stat>
-      {!probe && (
+      {practice && (
         <Stat k={`Score · reading bonus ×${report.bonus.toFixed(1)}`}>
           {report.score.toLocaleString()}
         </Stat>
       )}
       <p
         className="m-0 font-semibold text-[13px] px-2.5 py-[7px] rounded-lg bg-surface-sunken"
-        style={{ color: report.good ? OK_COLOR : WARN_COLOR }}
+        style={{ color: verdict.good ? OK_COLOR : WARN_COLOR }}
       >
-        {report.verdict}
+        {verdict.text}
       </p>
-      {!probe && guide}
+      {practice && guide}
     </Panel>
   );
 }
@@ -302,7 +333,9 @@ export function TempoLadder({
     <div className="flex flex-col gap-1.5">
       <span className="flex justify-between text-[12px] text-text-muted">
         <span>Tempo ladder · {Math.round(bpm * speed)} BPM</span>
-        <span className="tabular-nums">clean {ladder.clean}/2</span>
+        <span className="tabular-nums">
+          clean {ladder.clean}/{PASSES_TO_MOVE}
+        </span>
       </span>
       <div className="grid grid-cols-[repeat(9,minmax(26px,1fr))] gap-[3px]">
         {RUNGS.map((r, i) => {
