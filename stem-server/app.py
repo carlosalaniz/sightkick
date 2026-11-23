@@ -152,6 +152,31 @@ HTTP_ERROR_CODES = {
 log = logging.getLogger("stem-server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+# Job outcomes, cancels and refused requests, one JSON object per line so they
+# can be searched and counted. Tracebacks and other detail go to `log`.
+events = logging.getLogger("stem-server.events")
+_event_handler = logging.StreamHandler()
+_event_handler.setFormatter(logging.Formatter("%(message)s"))
+events.addHandler(_event_handler)
+events.setLevel(logging.INFO)
+events.propagate = False
+
+# How loud a failed job's outcome line is: a song we can't use is expected;
+# the rest means the server needs a look.
+ERROR_LOG_LEVELS = {
+    "decode_failed": logging.WARNING,
+    "no_drums": logging.WARNING,
+    "model_unavailable": logging.ERROR,
+    "timed_out": logging.ERROR,
+    "internal": logging.ERROR,
+}
+assert ERROR_LOG_LEVELS.keys() == JOB_ERROR_MESSAGES.keys(), "classify every job error code"
+
+
+def log_event(event: str, level: int = logging.INFO, **fields) -> None:
+    record = {"ts": round(time.time(), 3), "level": logging.getLevelName(level).lower(), "event": event, **fields}
+    events.log(level, json.dumps(record))
+
 
 class Cancelled(Exception):
     pass
@@ -193,6 +218,7 @@ class Job:
     error_code: str | None = None
     stems: dict[str, Path] = field(default_factory=dict)
     cancelled: bool = False
+    created: float = field(default_factory=time.time)
     # clock() time past which the running job stops; set when it starts.
     deadline: float = math.inf
     updated: float = field(default_factory=time.time)
@@ -210,6 +236,24 @@ class Job:
         for key, value in changes.items():
             setattr(self, key, value)
         self.updated = time.time()
+
+    def log_outcome(self) -> None:
+        """The one log line for a job reaching done, error or cancelled."""
+        level = ERROR_LOG_LEVELS[self.error_code] if self.error_code else logging.INFO
+        log_event(
+            "job_finished",
+            level,
+            job_id=self.id,
+            cache_key=self.cache_key,
+            mode=self.mode,
+            quality=self.quality,
+            outcome=self.status,
+            error_code=self.error_code,
+            cached=self.cached,
+            stems=sorted(self.stems),
+            # From the request that created the job, so it includes queue time.
+            duration_s=round(time.time() - self.created, 2),
+        )
 
     def to_json(self, position: int | None) -> dict:
         return {
@@ -624,12 +668,10 @@ def worker(stop: threading.Event) -> None:
             if not job or job.cancelled:
                 continue
             job.set(status="running", stage="preparing", progress=1, deadline=clock() + JOB_TIMEOUT_SECONDS)
-        started = time.time()
         error_code = None
         try:
             process(job)
             outcome = "done"
-            log.info("Job %s done in %.0fs: %s", job.id, time.time() - started, sorted(job.stems))
         except Cancelled:
             outcome = "cancelled"
         except JobFailed as exc:
@@ -643,7 +685,8 @@ def worker(stop: threading.Event) -> None:
             outcome, error_code = "error", "internal"
         finally:
             current_job = None
-        finish(job, outcome, error_code)
+        if finish(job, outcome, error_code):
+            job.log_outcome()
         if outcome == "cancelled":
             shutil.rmtree(job.dir, ignore_errors=True)
 
@@ -675,6 +718,7 @@ def expire_overdue_job() -> None:
         return
     job.cancelled = True
     if finish(job, "error", "timed_out"):
+        job.log_outcome()
         log.error("Job %s is stuck past its deadline; timed it out. The worker stays busy until the model returns.", job.id)
 
 
@@ -725,6 +769,8 @@ async def reject_oversized_uploads(request: Request, call_next):
     length = request.headers.get("content-length", "")
     limit = MAX_UPLOAD_MB * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES
     if request.method == "POST" and length.isdigit() and int(length) > limit:
+        log_event("request_rejected", logging.WARNING, path=request.url.path, status=413, code="too_large",
+                  content_length=int(length))
         return JSONResponse({"detail": f"Upload is over {MAX_UPLOAD_MB} MB", "code": "too_large"}, 413)
     return await call_next(request)
 
@@ -738,16 +784,22 @@ app.add_middleware(
 
 
 @app.exception_handler(StarletteHTTPException)
-async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     # Every error response is {"detail": <our message>, "code": <HTTP_ERROR_CODES>}.
     code = HTTP_ERROR_CODES.get(exc.status_code) or ("bad_request" if exc.status_code < 500 else "internal")
+    if request.method == "POST":
+        # A refused split request. (404s on polls and deletes aren't news.)
+        log_event("request_rejected", logging.WARNING, path=request.url.path, status=exc.status_code, code=code,
+                  detail=exc.detail)
     return JSONResponse({"detail": exc.detail, "code": code}, exc.status_code, headers=exc.headers)
 
 
 @app.exception_handler(RequestValidationError)
-async def invalid_request(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+async def invalid_request(request: Request, _exc: RequestValidationError) -> JSONResponse:
     # FastAPI's own 422 body lists pydantic errors; send our message instead.
     detail = "Send the audio as multipart 'files', with optional 'quality' and 'mode' fields"
+    log_event("request_rejected", logging.WARNING, path=request.url.path, status=400, code="bad_request",
+              detail=detail)
     return JSONResponse({"detail": detail, "code": "bad_request"}, 400)
 
 
@@ -851,7 +903,7 @@ async def create_job(
     job.set(status="done", stage="done", progress=100, stems=stems, cached=True)
     with lock:
         jobs[job_id] = job
-    log.info("Job %s served from cache %s", job_id, key)
+    job.log_outcome()
     return job.to_json(None)
 
 
@@ -884,19 +936,25 @@ def cancel_job(job_id: str) -> dict:
     # worker starting it, must see either the job before the cancel or after
     # it, never a job that is half cancelled.
     with lock:
+        status = job.status
         job.watchers -= 1
         if job.watchers > 0:
             # Another client still follows this job: only this one lets go.
-            return {"id": job.id, "cancelled": True}
-        job.cancelled = True
-        # A running job stops at the model's next chunk; the worker records it.
-        drop = job.status != "running"
-        if job.status == "queued":
-            job.set(status="cancelled", stage="cancelled")
-        if drop:
-            jobs.pop(job.id, None)
-            if job.cache_key and inflight.get(job.cache_key) == job.id:
-                inflight.pop(job.cache_key, None)
-    if drop:
+            effect = "released"
+        else:
+            job.cancelled = True
+            # A running job stops at the model's next chunk; the worker
+            # records the outcome. Anything else is dropped now.
+            effect = "stopping" if status == "running" else "dropped"
+            if status == "queued":
+                job.set(status="cancelled", stage="cancelled")
+            if effect == "dropped":
+                jobs.pop(job.id, None)
+                if job.cache_key and inflight.get(job.cache_key) == job.id:
+                    inflight.pop(job.cache_key, None)
+    log_event("job_cancel", job_id=job.id, status=status, effect=effect, watchers=max(job.watchers, 0))
+    if status == "queued" and effect == "dropped":
+        job.log_outcome()
+    if effect == "dropped":
         shutil.rmtree(job.dir, ignore_errors=True)
     return {"id": job.id, "cancelled": True}

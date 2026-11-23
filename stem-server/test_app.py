@@ -7,6 +7,7 @@ Run from stem-server/: python -m pytest test_app.py
 import hashlib
 import io
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -542,3 +543,55 @@ def test_a_full_queue_refuses_new_jobs_with_429_but_still_lets_requests_join(cli
     lib.gate.set()
     assert wait_done(client, running["id"])["status"] == "done"
     assert wait_done(client, queued["id"])["status"] == "done"
+
+
+@pytest.fixture
+def events():
+    """The JSON event lines the server logs, parsed."""
+    lines: list[dict] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            lines.append(json.loads(record.getMessage()))
+
+    handler = Collect()
+    app.events.addHandler(handler)
+    yield lines
+    app.events.removeHandler(handler)
+
+
+def test_each_finished_job_logs_one_json_outcome_line(client, lib, events):
+    done = wait_done(client, post(client, wav_bytes(2300))["id"])
+    cached = post(client, wav_bytes(2300))
+    lib.fail = RuntimeError("LIBRARY-TEXT")
+    failed = wait_done(client, post(client, wav_bytes(2301))["id"])
+
+    finished = [e for e in events if e["event"] == "job_finished"]
+    assert [(e["job_id"], e["outcome"], e["cached"]) for e in finished] == [
+        (done["id"], "done", False),
+        (cached["id"], "done", True),
+        (failed["id"], "error", False),
+    ]
+    assert finished[2]["error_code"] == "internal" and finished[2]["level"] == "error"
+    for e in finished:
+        assert e["mode"] == "stems" and e["quality"] == "fast"
+        assert len(e["cache_key"]) == 64 and e["duration_s"] >= 0
+
+
+def test_cancels_and_refused_requests_are_logged(client, lib, events):
+    lib.gate = threading.Event()
+    running = post(client, wav_bytes(2400))
+    wait_for(lib.chunks_started.is_set, "the model to start")
+    queued = post(client, wav_bytes(2401))
+    client.delete(f"/jobs/{queued['id']}")
+    client.delete(f"/jobs/{running['id']}")
+    lib.gate.set()
+    wait_done(client, running["id"])
+    client.post("/jobs", files=[("files", ("a.wav", b"x", "audio/wav"))], data={"mode": "karaoke"})
+
+    cancels = [(e["job_id"], e["effect"]) for e in events if e["event"] == "job_cancel"]
+    assert cancels == [(queued["id"], "dropped"), (running["id"], "stopping")]
+    outcomes = {e["job_id"]: e["outcome"] for e in events if e["event"] == "job_finished"}
+    assert outcomes == {queued["id"]: "cancelled", running["id"]: "cancelled"}
+    rejected = [e for e in events if e["event"] == "request_rejected"]
+    assert [(e["status"], e["code"]) for e in rejected] == [(400, "bad_request")]

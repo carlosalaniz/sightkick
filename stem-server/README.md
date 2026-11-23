@@ -119,6 +119,14 @@ Every HTTP error response is `{ "detail": "<message>", "code": "<code>" }`:
 | 429 | `busy` | `SK_MAX_QUEUED` jobs are already waiting; try again later |
 | 503 | `model_unavailable` | The model a request needs has failed to load |
 
+## Logs
+
+Besides the usual log lines (and tracebacks for failures, with the job id), the server writes one JSON object per line for:
+
+* `job_finished`: every job that ends `done`, `error` or `cancelled`, including cache hits, with `job_id`, `cache_key`, `mode`, `quality`, `outcome`, `error_code`, `cached`, `stems` and `duration_s` (from the request, so it includes time in the queue).
+* `job_cancel`: a `DELETE /jobs/{id}`, with its `effect`: `released` (other clients still follow the job), `stopping` (a running job will stop at the next model chunk) or `dropped`.
+* `request_rejected`: a `POST` refused with a 4xx or 5xx, with its `status`, `code` and `detail`.
+
 ## Tests
 
 The job queue, cache and error outcomes have tests that fake the separation library at its import path (so the server's own model code still runs) and use the real ffmpeg:
