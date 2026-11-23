@@ -280,12 +280,12 @@ describe('Transport', () => {
     const { engine, player } = await setup();
     const ctx = MockAudioPlayer.instances[0].context;
 
-    engine.hold();
+    expect(engine.hold()).toBe('not-playing');
     expect(ctx.suspend).not.toHaveBeenCalled();
 
     engine.playFromTick(1920);
-    engine.hold();
-    engine.hold();
+    expect(engine.hold()).toBe('held');
+    expect(engine.hold()).toBe('already-held');
 
     expect(engine.isHeld).toBe(true);
     expect(ctx.suspend).toHaveBeenCalledTimes(1);

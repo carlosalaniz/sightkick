@@ -119,6 +119,14 @@ export type PlaybackState =
   | 'playing'
   | 'ended';
 
+/**
+ * What a wait-mode hold request did:
+ * - held: the song is stopping (or stopped again) for it.
+ * - already-held: a hold was already on; nothing changed.
+ * - not-playing: nothing is playing, so there is nothing to hold.
+ */
+export type HoldResult = 'held' | 'already-held' | 'not-playing';
+
 export interface LoopRegion {
   startTick: number;
   endTick: number;

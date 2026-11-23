@@ -5,6 +5,7 @@ import { TimeStore } from '../time-store';
 import { AudioPlayer } from '../audio-player/types';
 import { playerFactoryForMode } from '../audio-player/factories';
 import { Transport } from './transport';
+import { assertNever } from '../../../shared/assertNever';
 import { Judge } from './judge';
 import { GameRenderer } from './game-renderer';
 import { DRUM_GATE_FADE_SECONDS, DRUM_STEM_NAME } from './constants';
@@ -13,6 +14,7 @@ import {
   EngineOptions,
   GameRendererRefs,
   EngineSettings,
+  HoldResult,
   JudgedHitHandler,
   JudgeSettings,
   LoopRegion,
@@ -171,11 +173,32 @@ export class Engine {
 
   /**
    * Wait mode: freeze playback on the spot until `release`. `ticks` are the
-   * notes it waits for; a matching hit goes to them first.
+   * notes it waits for; a matching hit goes to them first, but only while a
+   * hold is on, so a hold asked for with nothing playing changes no scoring.
    */
-  hold(ticks: Iterable<number> = []): void {
-    this.judge.setPriorityTargets(ticks, WAIT_MODE_TARGETS);
-    this.transport.hold();
+  hold(ticks: Iterable<number> = []): HoldResult {
+    const result = this.transport.hold();
+
+    switch (result) {
+      case 'held':
+        this.judge.setPriorityTargets(ticks, WAIT_MODE_TARGETS);
+
+        return result;
+
+      case 'already-held':
+        // Wait mode adds notes that come due while it waits.
+        this.judge.setPriorityTargets(ticks, WAIT_MODE_TARGETS);
+
+        return result;
+
+      case 'not-playing':
+        this.judge.clearPriorityTargets();
+
+        return result;
+
+      default:
+        return assertNever(result, 'hold result');
+    }
   }
 
   release(): void {

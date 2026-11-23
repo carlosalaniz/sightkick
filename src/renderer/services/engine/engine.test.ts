@@ -753,4 +753,28 @@ describe('Engine wait mode', () => {
 
     expect(engine.isHit(480, 'c/5')).toBe(false);
   });
+
+  it('changes no scoring when asked to hold with nothing playing', async () => {
+    const { engine, player } = await waitSetup();
+
+    expect(engine.hold([480])).toBe('not-playing');
+    expect(engine.isHeld).toBe(false);
+
+    engine.play();
+    playTo(player, 0.5);
+    emitInput('midi:38', 127); // too loud for a ghost note
+
+    expect(engine.isHit(480, 'c/5')).toBe(false);
+  });
+
+  it('says whether a hold took effect', async () => {
+    const { engine, player } = await waitSetup();
+
+    engine.playFromTick(0);
+    playTo(player, 0.6);
+
+    expect(engine.hold([480])).toBe('held');
+    expect(engine.hold([480])).toBe('already-held');
+    expect(engine.isHeld).toBe(true);
+  });
 });

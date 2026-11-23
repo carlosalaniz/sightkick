@@ -16,6 +16,7 @@ import {
 } from '../click-track';
 import { Beat, getBeatGrid, getCountInInfo } from '../beat-grid';
 import {
+  HoldResult,
   LoopRegion,
   PlaybackFailure,
   PlaybackSnapshot,
@@ -423,11 +424,11 @@ export class Transport {
    * mid-waveform clicks; a hit during the fade cancels the freeze, so a
    * slightly late hit dips the volume instead of stopping the song.
    */
-  hold(): void {
+  hold(): HoldResult {
     const player = this.audioPlayer;
 
     if (!player || this.state !== 'playing') {
-      return;
+      return 'not-playing';
     }
 
     const hold = this.holdState;
@@ -436,28 +437,28 @@ export class Transport {
       case 'free':
         this.startFadeOut(player, undefined);
 
-        return;
+        return 'held';
 
       case 'settling':
         this.startFadeOut(player, hold.at);
 
-        return;
+        return 'held';
 
       case 'fading':
-        return;
+        return 'already-held';
 
       case 'frozen':
-        return;
+        return 'already-held';
 
       case 'resuming':
         // Still frozen from a release whose resume hasn't finished (and still
         // silent): freeze again at once. That resume is stale now.
         this.freeze(hold.at);
 
-        return;
+        return 'held';
 
       default:
-        assertNever(hold, 'hold state');
+        return assertNever(hold, 'hold state');
     }
   }
 
