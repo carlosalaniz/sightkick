@@ -6,6 +6,7 @@ import {
   faPlay,
   faRotateLeft,
 } from '@fortawesome/free-solid-svg-icons';
+import { assertNever } from '../../../../shared/assertNever';
 import { usePersisted } from '../../../hooks/usePersisted';
 import { TimelineNote, Voice, VOICE_INFO } from '../../../kit';
 import { useAnimationFrame, useNoteJudgments, usePadStrikes } from '../hooks';
@@ -76,7 +77,21 @@ import {
   runUpStart,
   WAIT_GRACE_OPTIONS_MS,
 } from './lesson/pace';
-import { NO_WAIT_STATS, WaitStats, WaitStatsBar } from './lesson/WaitStatsBar';
+import { WaitStatsBar } from './lesson/WaitStatsBar';
+import {
+  heldIds,
+  holdStartFor,
+  INITIAL_WAIT,
+  RUN_UP_REACH_SECONDS,
+  WaitAction,
+  waitFrame,
+  waitHit,
+  waitMiss,
+  waitPassEnd,
+  waitRewind,
+  WaitState,
+  WaitStats,
+} from './lesson/wait';
 import { TimingStrip } from './lesson/TimingStrip';
 import {
   buildSteps,
@@ -113,15 +128,7 @@ interface Toast {
 }
 
 const voicesOf = (notes: TimelineNote[]) => new Set(notes.map((n) => n.voice));
-/** How far before the lesson window a run-up may start (into the bar before). */
-const RUN_UP_REACH = 2;
-/** A shorter run-up than this isn't one; the song just carries on. */
-const MIN_RUN_UP = 0.2;
-/**
- * Run-ups into one note per pass. Still late after that, the song just carries
- * on once you find it, rather than looping on a note you can't place yet.
- */
-const MAX_RUN_UPS = 2;
+const NO_VOICES: readonly Voice[] = [];
 
 export function LessonView({ session }: { session: PlaySession }) {
   const { engine, bars, notes, pieceByVoice, timeStore, setPlaybackSpeed } =
@@ -188,19 +195,12 @@ export function LessonView({ session }: { session: PlaySession }) {
     parseWaitGrace,
   );
   const [runUp, setRunUp] = usePersisted(RUN_UP_KEY, true, parseFlag);
-  /** When the current hold started (performance.now), and on which notes. */
-  const hold = useRef<{ since: number; ids: Set<string> } | undefined>(
-    undefined,
-  );
-  /** Where a run-up rewound to, until the view sees the rewind. */
-  const runUpFrom = useRef<number | undefined>(undefined);
-  /** The notes a run-up leads into, until they're hit or held again. */
-  const runUpIds = useRef(new Set<string>());
-  /** Run-ups into each note this pass, by note id. */
-  const runUpTries = useRef(new Map<string, number>());
-  const [runUpFor, setRunUpFor] = useState<Voice[]>([]);
-  const waits = useRef({ pass: 0, streak: 0 });
-  const [waitStats, setWaitStats] = useState<WaitStats>(NO_WAIT_STATS);
+  /** Wait mode's state (lesson/wait.ts). The UI mirrors only `waitView`. */
+  const wait = useRef<WaitState>(INITIAL_WAIT);
+  const [waitView, setWaitView] = useState<{
+    stats: WaitStats;
+    runUpFor: readonly Voice[];
+  }>({ stats: INITIAL_WAIT.stats, runUpFor: NO_VOICES });
   const [timing, setTiming] = useState<{ key: string; stats: OffsetStats }>({
     key: '',
     stats: { offsets: [], mean: undefined, spread: undefined },
@@ -338,6 +338,39 @@ export function LessonView({ session }: { session: PlaySession }) {
     return () => clearTimeout(hide);
   }, [toast]);
 
+  /** Moves wait mode on, and shows what the UI shows of it if that changed. */
+  const setWait = (next: WaitState) => {
+    const runUpFor =
+      next.phase.kind === 'runningUp' ? next.phase.voices : NO_VOICES;
+
+    wait.current = next;
+    setWaitView((prev) =>
+      prev.stats === next.stats && prev.runUpFor === runUpFor
+        ? prev
+        : { stats: next.stats, runUpFor },
+    );
+  };
+  const performWaitAction = (action: WaitAction) => {
+    switch (action.kind) {
+      case 'hold':
+        engine.hold(action.ticks);
+
+        return;
+
+      case 'release':
+        engine.release();
+
+        return;
+
+      case 'seek':
+        session.seekSeconds(action.seconds);
+
+        return;
+
+      default:
+        assertNever(action, 'wait action');
+    }
+  };
   const saveProgress = (update: (p: SongProgress) => SongProgress) =>
     setAllProgress((all) => ({
       ...all,
@@ -419,7 +452,7 @@ export function LessonView({ session }: { session: PlaySession }) {
             })),
             win.endBar - win.startBar,
           );
-    const passWaits = waitMode ? waits.current.pass : 0;
+    const passWaits = waitMode ? wait.current.stats.waits : 0;
     const outcome = endPass(state, passResult, {
       steps,
       stars,
@@ -457,6 +490,36 @@ export function LessonView({ session }: { session: PlaySession }) {
         lesson: nextKey,
       }));
     }
+  };
+  /** A run-up: the same pass, replayed from a beat before the held note. */
+  const replayFrom = (from: number) => {
+    const t = tracker.current;
+
+    // Hits from there on are played again; the rest of the pass stands.
+    [...t.hits.keys()].forEach((id) => {
+      if ((noteById.get(id)?.time ?? -Infinity) >= from - 1e-3) {
+        t.hits.delete(id);
+      }
+    });
+    tempoMeter.current.meter.break();
+  };
+  /** A loop wrap, restart or seek: score the pass if it was played through. */
+  const endPassAt = (now: number) => {
+    const t = tracker.current;
+    const complete =
+      span !== undefined && isPassComplete(t.minTime, t.maxTime, span);
+
+    if (complete) {
+      evaluatePass();
+    }
+
+    setWait(waitPassEnd(wait.current, complete && waitMode));
+    t.hits = complete ? t.next : new Map();
+    t.next = new Map();
+    t.minTime = now;
+    t.maxTime = now;
+    tempoMeter.current.meter.break();
+    setPassId((n) => n + 1);
   };
   const tempoKey = `${state.speed}:${stepIdx}:${lessonIdx}:${waitMode}`;
 
@@ -497,17 +560,16 @@ export function LessonView({ session }: { session: PlaySession }) {
 
       recordOffset(t.history, note.voice, ms);
 
-      const held = hold.current;
-      const found = held?.ids.has(note.id) ?? false;
+      const holdSince = holdStartFor(wait.current, note.id);
 
       // Live timing. After a hold, count the time you actually took, so a
       // late hit still shows as late even though the song waited for it;
       // with a run-up, the hit that counts is the one in the run-up.
-      if (!(found && runUp)) {
+      if (holdSince === undefined || !runUp) {
         const realMs =
-          held && found
-            ? ms + (performance.now() - held.since) * state.speed
-            : ms;
+          holdSince === undefined
+            ? ms
+            : ms + (performance.now() - holdSince) * state.speed;
 
         setTiming((prev) => ({
           key: tempoKey,
@@ -518,18 +580,7 @@ export function LessonView({ session }: { session: PlaySession }) {
         }));
       }
 
-      if (waitMode && !found && !next) {
-        waits.current.streak += 1;
-        setWaitStats((w) => ({
-          ...w,
-          streak: waits.current.streak,
-          best: Math.max(w.best, waits.current.streak),
-        }));
-      }
-
-      if (runUpIds.current.delete(note.id) && runUpIds.current.size === 0) {
-        setRunUpFor([]);
-      }
+      setWait(waitHit(wait.current, { id: note.id, waitMode, nextPass: next }));
 
       if (!waitMode) {
         // A new tempo, step or lesson starts a fresh reading.
@@ -568,53 +619,27 @@ export function LessonView({ session }: { session: PlaySession }) {
         markStaffNote(staffRef.current, index, MISS_COLOR, true);
       }
 
-      waits.current.streak = 0;
-      setWaitStats((w) => (w.streak === 0 ? w : { ...w, streak: 0 }));
+      setWait(waitMiss(wait.current));
     },
     onRewind: (now) => {
-      const t = tracker.current;
-      const runUpTo = runUpFrom.current;
+      const { state: next, rewind } = waitRewind(wait.current, now);
 
-      runUpFrom.current = undefined;
+      setWait(next);
 
-      // A run-up: the same pass, replayed from a beat before the held note.
-      // Hits from there on are played again; the rest of the pass stands.
-      if (runUpTo !== undefined && Math.abs(now - runUpTo) < 0.25) {
-        [...t.hits.keys()].forEach((id) => {
-          if ((noteById.get(id)?.time ?? -Infinity) >= runUpTo - 1e-3) {
-            t.hits.delete(id);
-          }
-        });
-        tempoMeter.current.meter.break();
+      switch (rewind.kind) {
+        case 'runUp':
+          replayFrom(rewind.from);
 
-        return;
+          return;
+
+        case 'wrap':
+          endPassAt(now);
+
+          return;
+
+        default:
+          assertNever(rewind, 'wait rewind');
       }
-
-      const complete =
-        span !== undefined && isPassComplete(t.minTime, t.maxTime, span);
-
-      if (complete) {
-        evaluatePass();
-      }
-
-      const passWaits = waits.current.pass;
-
-      waits.current.pass = 0;
-      setWaitStats((w) => ({
-        ...w,
-        waits: 0,
-        lastWaits: complete && waitMode ? passWaits : w.lastWaits,
-      }));
-      runUpIds.current.clear();
-      runUpTries.current.clear();
-      setRunUpFor([]);
-
-      t.hits = complete ? t.next : new Map();
-      t.next = new Map();
-      t.minTime = now;
-      t.maxTime = now;
-      tempoMeter.current.meter.break();
-      setPassId((n) => n + 1);
     },
   });
 
@@ -649,63 +674,34 @@ export function LessonView({ session }: { session: PlaySession }) {
 
   // Wait mode: freeze on each of your notes until it is hit.
   useAnimationFrame(session, (now) => {
+    const isHit = (id: string) => tracker.current.hits.has(id);
     const due =
       waiting && session.isPlaying
         ? dueNotes(
             myNotes,
-            (n) => tracker.current.hits.has(n.id),
+            (n) => isHit(n.id),
             now,
             engine.hitTolerance,
             effectiveGrace(waitGraceMs, engine.hitTolerance),
-            hold.current?.ids,
+            heldIds(wait.current),
           )
         : [];
+    const floor = span ? span.start - RUN_UP_REACH_SECONDS : undefined;
+    const { state: next, actions } = waitFrame(wait.current, {
+      at: performance.now(),
+      due,
+      engineHeld: engine.isHeld,
+      notes: myNotes,
+      isHit,
+      runUpStart:
+        runUp && floor !== undefined
+          ? (time) => runUpStart(time, bars, floor)
+          : undefined,
+    });
 
-    if (due.length > 0) {
-      if (!hold.current) {
-        hold.current = { since: performance.now(), ids: new Set() };
-        waits.current.pass += 1;
-        waits.current.streak = 0;
-        setWaitStats((w) => ({ ...w, waits: waits.current.pass, streak: 0 }));
-        // Late again in a run-up: back to waiting.
-        runUpIds.current.clear();
-        setRunUpFor([]);
-      }
-
-      due.forEach((n) => hold.current?.ids.add(n.id));
-      engine.hold(due.map((n) => n.tick));
-    } else {
-      const held = hold.current;
-
-      if (engine.isHeld) {
-        const targets = held ? myNotes.filter((n) => held.ids.has(n.id)) : [];
-        const found =
-          targets.length > 0 &&
-          targets.every((n) => tracker.current.hits.has(n.id));
-        const first = Math.min(...targets.map((n) => n.time));
-        const key = targets[0]?.id ?? '';
-        const tries = runUpTries.current.get(key) ?? 0;
-        const from =
-          runUp && found && span && tries < MAX_RUN_UPS
-            ? runUpStart(first, bars, span.start - RUN_UP_REACH)
-            : first;
-
-        // Found the pad: now play it in time. Back up a beat and run into
-        // the note again; if it's late again, the song waits again. (Not at
-        // the very start of the song, where there's nothing to run up from.)
-        if (first - from >= MIN_RUN_UP) {
-          runUpFrom.current = from;
-          runUpTries.current.set(key, tries + 1);
-          runUpIds.current = new Set(targets.map((n) => n.id));
-          setRunUpFor(targets.map((n) => n.voice));
-          session.seekSeconds(from);
-        } else {
-          engine.release();
-        }
-      }
-
-      hold.current = undefined;
-    }
+    // State first: a seek's rewind must find the run-up it belongs to.
+    setWait(next);
+    actions.forEach(performWaitAction);
 
     const voices = due.map((n) => n.voice);
 
@@ -844,7 +840,7 @@ export function LessonView({ session }: { session: PlaySession }) {
             }
           />
           {waitMode ? (
-            <WaitStatsBar stats={waitStats} />
+            <WaitStatsBar stats={waitView.stats} />
           ) : (
             <TempoBar
               ratio={
@@ -884,14 +880,14 @@ export function LessonView({ session }: { session: PlaySession }) {
                   .join(' + ')}
               </div>
             )}
-            {waitingFor.length === 0 && runUpFor.length > 0 && (
+            {waitingFor.length === 0 && waitView.runUpFor.length > 0 && (
               <div
                 data-testid="run-up-for"
                 className="absolute top-3 right-3 rounded-full px-3.5 py-1.5 font-semibold text-[13px] whitespace-nowrap pointer-events-none"
                 style={{ background: OK, color: '#1b1b1b' }}
               >
                 Now in time:{' '}
-                {[...new Set(runUpFor)]
+                {[...new Set(waitView.runUpFor)]
                   .map((v) => VOICE_INFO[v].name.toLowerCase())
                   .join(' + ')}
               </div>

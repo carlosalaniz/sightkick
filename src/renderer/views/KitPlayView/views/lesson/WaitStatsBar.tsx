@@ -1,21 +1,5 @@
 import { OK, WARN } from './LessonPanels';
-
-export interface WaitStats {
-  /** Times the song waited in this pass so far. */
-  waits: number;
-  /** Your notes in a row hit without the song waiting. */
-  streak: number;
-  best: number;
-  /** Waits in the last finished pass. */
-  lastWaits: number | undefined;
-}
-
-export const NO_WAIT_STATS: WaitStats = {
-  waits: 0,
-  streak: 0,
-  best: 0,
-  lastWaits: undefined,
-};
+import { WaitStats } from './wait';
 
 function Stat({
   label,
