@@ -1,9 +1,11 @@
 import { SpeedAudioTrack } from './track';
-import { StretchStream } from './stretch-stream';
+import { ProduceResult, StretchFailure, StretchStream } from './stretch-stream';
 import { VoiceGroup } from './build-units';
 import { SYNTHESIS_HOP } from './channel-stretcher';
 import { PcmChannel } from './pcm';
 import { DRUM_KIT_PIECES, DRUM_STEM } from '../../../../songData';
+import { assertNever } from '../../../../shared/assertNever';
+import { log } from '../../../../shared/log';
 import { BaseAudioPlayer } from '../base-player';
 import {
   LoopWindow,
@@ -34,6 +36,32 @@ interface ChunkTarget {
 interface ProducedChunk {
   blocks: SampleBlock[];
   sampleCount: number;
+}
+
+/**
+ * - chunk: audio to schedule.
+ * - none: nothing to schedule (the song's end, or a stop/seek overtook it).
+ * - failed: the stretcher can't produce audio any more.
+ */
+type ChunkOutcome =
+  | { kind: 'chunk'; chunk: ProducedChunk }
+  | { kind: 'none' }
+  | { kind: 'failed'; reason: StretchFailure };
+
+/** What a produce that brought no blocks means for scheduling. */
+function withoutBlocks(
+  result: Exclude<ProduceResult, { kind: 'produced' }>,
+): ChunkOutcome {
+  switch (result.kind) {
+    case 'stopped':
+      return { kind: 'none' };
+
+    case 'failed':
+      return result;
+
+    default:
+      return assertNever(result, 'produce result');
+  }
 }
 
 export class SpeedAudioPlayer
@@ -228,10 +256,14 @@ export class SpeedAudioPlayer
     this.stream.seek(Math.round(outputStartSeconds * sampleRate));
     this.outputProducedSeconds = outputStartSeconds;
 
-    const firstChunk = await this.produceNextChunk(epoch);
+    const first = await this.produceNextChunk(epoch);
 
     if (epoch !== this.epoch) {
       return;
+    }
+
+    if (first.kind === 'failed') {
+      throw new Error(`time-stretched audio failed: ${first.reason}`);
     }
 
     const leadStartAt = this.context.currentTime + START_LEAD_SECONDS;
@@ -241,24 +273,31 @@ export class SpeedAudioPlayer
     this.scheduledUntil = startAt;
     this.isInitialised = true;
 
-    if (firstChunk) {
-      this.commitChunk(firstChunk);
+    if (first.kind === 'chunk') {
+      this.commitChunk(first.chunk);
     }
 
     this.timer = setInterval(this.pump, SCHEDULER_INTERVAL_MS);
   }
 
-  private async produceNextChunk(
-    epoch: number,
-  ): Promise<ProducedChunk | undefined> {
+  private async produceNextChunk(epoch: number): Promise<ChunkOutcome> {
     if (!this.hasActiveLoop()) {
-      const blocks = await this.stream.produce(FRAMES_PER_CHUNK);
+      const result = await this.stream.produce(FRAMES_PER_CHUNK);
 
-      if (epoch !== this.epoch || blocks.length === 0) {
-        return undefined;
+      if (result.kind !== 'produced') {
+        return withoutBlocks(result);
       }
 
-      return { blocks, sampleCount: blocks[0].length };
+      const { blocks } = result;
+
+      if (epoch !== this.epoch || blocks.length === 0) {
+        return { kind: 'none' };
+      }
+
+      return {
+        kind: 'chunk',
+        chunk: { blocks, sampleCount: blocks[0].length },
+      };
     }
 
     const speed = this._playbackSpeed;
@@ -289,10 +328,16 @@ export class SpeedAudioPlayer
     const sampleCount = Math.min(maxChunkSamples, remainingInPass);
     const frames = Math.max(1, Math.ceil(sampleCount / SYNTHESIS_HOP));
     const wrapsAtEnd = sampleCount === remainingInPass;
-    const blocks = await this.stream.produce(frames);
+    const result = await this.stream.produce(frames);
+
+    if (result.kind !== 'produced') {
+      return withoutBlocks(result);
+    }
+
+    const { blocks } = result;
 
     if (epoch !== this.epoch || blocks.length === 0) {
-      return undefined;
+      return { kind: 'none' };
     }
 
     if (wrapsAtEnd && this.hasActiveLoop()) {
@@ -303,8 +348,8 @@ export class SpeedAudioPlayer
     }
 
     return {
-      blocks,
-      sampleCount: Math.min(sampleCount, blocks[0].length),
+      kind: 'chunk',
+      chunk: { blocks, sampleCount: Math.min(sampleCount, blocks[0].length) },
     };
   }
 
@@ -378,13 +423,23 @@ export class SpeedAudioPlayer
         (this.hasActiveLoop() ||
           this.outputProducedSeconds < this.totalOutputSeconds)
       ) {
-        const chunk = await this.produceNextChunk(epoch);
+        const next = await this.produceNextChunk(epoch);
 
-        if (epoch !== this.epoch || !this.isInitialised || !chunk) {
+        if (epoch !== this.epoch || !this.isInitialised) {
           break;
         }
 
-        this.commitChunk(chunk);
+        if (next.kind === 'failed') {
+          this.handleStretchFailed(next.reason);
+
+          break;
+        }
+
+        if (next.kind === 'none') {
+          break;
+        }
+
+        this.commitChunk(next.chunk);
       }
     } finally {
       this.pumping = false;
@@ -401,6 +456,22 @@ export class SpeedAudioPlayer
       this.onEnded?.();
     }
   };
+
+  /**
+   * No more audio is coming mid-song: stop asking. What is scheduled plays
+   * out and the clock keeps the song time going; a new start tries again.
+   */
+  private handleStretchFailed(reason: StretchFailure) {
+    log.error('speed_player.stretch_failed', {
+      reason,
+      songTime: this.currentTime,
+    });
+
+    if (this.timer !== undefined) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
 
   stop() {
     if (this.timer !== undefined) {

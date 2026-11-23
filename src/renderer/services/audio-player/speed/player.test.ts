@@ -6,6 +6,7 @@ import {
 } from '../test-support';
 import { SpeedAudioPlayer } from './player';
 import { TrackConfig } from '../types';
+import { log } from '../../../../shared/log';
 
 const trimSpy = vi.hoisted(() => vi.fn((buffer: unknown) => buffer));
 
@@ -38,7 +39,10 @@ vi.mock('./stretch-stream', () => {
     seek = vi.fn();
 
     produce = vi.fn((frames: number) =>
-      Promise.resolve(this.channels.map(() => new Float32Array(frames * 512))),
+      Promise.resolve({
+        kind: 'produced',
+        blocks: this.channels.map(() => new Float32Array(frames * 512)),
+      }),
     );
 
     destroy = vi.fn();
@@ -79,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('SpeedAudioPlayer', () => {
@@ -310,5 +315,39 @@ describe('SpeedAudioPlayer', () => {
       Math.round(1.4 * context.sampleRate),
     );
     expect(player.currentTime).toBeCloseTo(1.4, 5);
+  });
+
+  it('fails the start when the stretcher can produce no audio', async () => {
+    const { player, stream } = await makePlayer();
+
+    stream.produce.mockResolvedValue({
+      kind: 'failed',
+      reason: 'worker-crashed',
+    });
+
+    await expect(player.start(0)).rejects.toThrow(
+      'time-stretched audio failed: worker-crashed',
+    );
+    expect(player.isInitialised).toBe(false);
+  });
+
+  it('stops asking a stretcher that failed mid-song, and logs it', async () => {
+    vi.spyOn(log, 'error').mockImplementation(() => {});
+
+    const { player, stream } = await makePlayer();
+
+    await player.start(0);
+    stream.produce.mockResolvedValue({ kind: 'failed', reason: 'timed-out' });
+    await vi.advanceTimersByTimeAsync(100);
+
+    const calls = stream.produce.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(stream.produce.mock.calls.length).toBe(calls);
+    expect(log.error).toHaveBeenCalledWith(
+      'speed_player.stretch_failed',
+      expect.objectContaining({ reason: 'timed-out' }),
+    );
+    expect(player.isInitialised).toBe(true);
   });
 });

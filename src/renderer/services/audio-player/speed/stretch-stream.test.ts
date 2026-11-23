@@ -73,10 +73,13 @@ describe('StretchStream (worker-less fallback)', () => {
 
     stream.init(CHANNELS, 1, GROUPS, 48000);
 
-    const blocks = await stream.produce(4);
+    const result = await stream.produce(4);
 
     expect(scatterBlocks).toHaveBeenCalledWith([unit], 1, 4);
-    expect(blocks).toEqual([new Float32Array([7])]);
+    expect(result).toEqual({
+      kind: 'produced',
+      blocks: [new Float32Array([7])],
+    });
   });
 
   it('stops forwarding seeks after destroy', () => {
@@ -91,7 +94,7 @@ describe('StretchStream (worker-less fallback)', () => {
     expect(unit.seek).not.toHaveBeenCalled();
   });
 
-  it('settles pending produce promises with no blocks on destroy', async () => {
+  it('settles pending produce promises as stopped on destroy', async () => {
     vi.stubGlobal(
       'Worker',
       class {
@@ -111,6 +114,6 @@ describe('StretchStream (worker-less fallback)', () => {
 
     stream.destroy();
 
-    await expect(producePromise).resolves.toEqual([]);
+    await expect(producePromise).resolves.toEqual({ kind: 'stopped' });
   });
 });
