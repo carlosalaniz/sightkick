@@ -12,8 +12,15 @@ COPY .yarn/releases .yarn/releases
 RUN yarn install --immutable --mode=skip-build
 
 COPY tsconfig.json vite.web.config.ts ./
+COPY scripts/build-info.ts scripts/
 COPY assets assets
 COPY src src
+# The commit shown in the app and in /version.json. The build context has no
+# .git, so it comes in as a build arg: SK_COMMIT for a manual build
+# (docker compose passes it through), HARBOR_SOURCE_COMMIT from Harbor.
+ARG SK_COMMIT=""
+ARG HARBOR_SOURCE_COMMIT=""
+ENV SK_COMMIT=${SK_COMMIT} HARBOR_SOURCE_COMMIT=${HARBOR_SOURCE_COMMIT}
 # Default stem server address baked into the app. "/stem-api" is proxied by
 # this image's nginx when SK_STEM_UPSTREAM is set at run time; users can still
 # point the app elsewhere in its settings.

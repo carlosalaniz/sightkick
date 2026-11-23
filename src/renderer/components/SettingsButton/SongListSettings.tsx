@@ -14,6 +14,7 @@ import { SupportButton } from '../SupportButton/SupportButton';
 import { DISCORD_URL } from './constants';
 import { IS_WEB } from '../../platform';
 import { StemServerSettings } from '../StemServerSettings';
+import { BUILD, buildLabel } from '../../../buildInfo';
 
 // Must match BROWSER_ROOT_NAME in src/web/library.ts.
 const BROWSER_STORAGE = 'Browser storage';
@@ -132,6 +133,14 @@ export function SongListSettings({
       </Tooltip>
 
       <SupportButton />
+
+      <div
+        className="text-xs text-text-muted text-center select-text"
+        data-testid="build-info"
+        title={`SightKick ${BUILD.version}, commit ${BUILD.commit}`}
+      >
+        SightKick {buildLabel()}
+      </div>
     </>
   );
 }

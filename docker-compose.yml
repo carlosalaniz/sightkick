@@ -6,6 +6,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      # Shown in the app: SK_COMMIT=$(git rev-parse HEAD) docker compose up --build
+      args:
+        SK_COMMIT: ${SK_COMMIT:-}
     image: sightkick-web
     ports:
       - "127.0.0.1:${SK_WEB_PORT:-4280}:80"
