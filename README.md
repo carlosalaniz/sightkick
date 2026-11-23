@@ -45,6 +45,8 @@ yarn storybook      # component stories on :6006
 yarn package        # build a macOS app (yarn package:win / package:linux)
 ```
 
+Every commit raises the patch version in `package.json` (a pre-commit hook in `.githooks/`, switched on by `yarn install`; skip it with `SK_SKIP_VERSION_BUMP=1`). The app shows its version at the bottom of the song list's settings, and the web build serves it as `/version.json`, so you can tell which build a server or an installed app is running.
+
 ## Web version
 
 SightKick also runs in the browser, with no install. `src/web` stands in for the Electron main process: it answers the same IPC channels with web APIs (File System Access / OPFS for the song library, IndexedDB for song data, Web MIDI for the kit, the Wake Lock API to keep the screen on).
