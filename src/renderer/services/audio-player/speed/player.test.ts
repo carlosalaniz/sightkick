@@ -350,4 +350,36 @@ describe('SpeedAudioPlayer', () => {
     );
     expect(player.isInitialised).toBe(true);
   });
+
+  it('fails every start once setting up the stretcher has failed', async () => {
+    vi.spyOn(log, 'error').mockImplementation(() => {});
+
+    const player = new SpeedAudioPlayer(TRACKS, vi.fn());
+    const [stream] = streams;
+
+    stream.init.mockImplementation(() => {
+      throw new DOMException('could not clone', 'DataCloneError');
+    });
+    await player.ready;
+    await flush();
+
+    await expect(player.start(0)).rejects.toThrow(
+      'time-stretched audio not ready: failed',
+    );
+    expect(log.error).toHaveBeenCalledWith(
+      'speed_player.prepare_failed',
+      expect.objectContaining({ setup: 'unbuilt' }),
+      expect.any(DOMException),
+    );
+
+    // The samples went with the failed setup: a new speed can't bring the
+    // song back, and must not start it silent either.
+    stream.init.mockClear();
+    player.setPlaybackSpeed(0.5);
+    await flush();
+    expect(stream.init).not.toHaveBeenCalled();
+    await expect(player.start(0)).rejects.toThrow(
+      'time-stretched audio not ready: failed',
+    );
+  });
 });

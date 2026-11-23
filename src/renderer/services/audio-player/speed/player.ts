@@ -48,6 +48,21 @@ type ChunkOutcome =
   | { kind: 'none' }
   | { kind: 'failed'; reason: StretchFailure };
 
+/**
+ * Whether the stretcher can play the song at the latest speed asked for:
+ * - prepared: yes.
+ * - not-loaded: the song's audio never loaded (reported where it is loaded).
+ * - failed: setting up the stretcher failed; see the log.
+ */
+type PrepareResult = 'prepared' | 'not-loaded' | 'failed';
+
+/**
+ * The stretcher's samples: still in the tracks, handed to the stream, or
+ * lost to a setup that failed after taking them (takePcm empties the tracks,
+ * so there is nothing left to retry with).
+ */
+type StreamSetup = 'unbuilt' | 'ready' | 'failed';
+
 /** What a produce that brought no blocks means for scheduling. */
 function withoutBlocks(
   result: Exclude<ProduceResult, { kind: 'produced' }>,
@@ -68,14 +83,14 @@ export class SpeedAudioPlayer
   extends BaseAudioPlayer<SpeedAudioTrack>
   implements SpeedControllableAudioPlayer
 {
-  prepared: Promise<void> = Promise.resolve();
+  prepared: Promise<PrepareResult> = Promise.resolve('not-loaded');
   onEnded: (() => void) | undefined;
   private _playbackSpeed: number = 1;
   private stream: StretchStream = new StretchStream();
   private voices: PcmChannel[] = [];
   private targets: ChunkTarget[] = [];
   private groups: VoiceGroup[] = [];
-  private voicesBuilt: boolean = false;
+  private streamSetup: StreamSetup = 'unbuilt';
   private timer: ReturnType<typeof setInterval> | undefined;
   private scheduledUntil: number = 0;
   private outputProducedSeconds: number = 0;
@@ -170,9 +185,22 @@ export class SpeedAudioPlayer
   private prepare() {
     const speed = this._playbackSpeed;
 
-    this.prepared = this.ready
-      .then((tracks) => {
-        if (!this.voicesBuilt) {
+    this.prepared = this.ready.then(
+      (tracks) => this.prepareStream(tracks, speed),
+      // A load failure is reported by whoever awaits `ready` (the transport).
+      (): PrepareResult => 'not-loaded',
+    );
+  }
+
+  private prepareStream(
+    tracks: SpeedAudioTrack[],
+    speed: number,
+  ): PrepareResult {
+    const setup = this.streamSetup;
+
+    try {
+      switch (setup) {
+        case 'unbuilt':
           this.buildVoices(tracks);
           this.stream.init(
             this.voices,
@@ -182,12 +210,31 @@ export class SpeedAudioPlayer
           );
           // The stream owns the samples now (moved to its worker, if any).
           this.voices = [];
-          this.voicesBuilt = true;
-        } else {
+          this.streamSetup = 'ready';
+
+          return 'prepared';
+
+        case 'ready':
           this.stream.setSpeed(speed);
-        }
-      })
-      .catch(() => {});
+
+          return 'prepared';
+
+        case 'failed':
+          return 'failed';
+
+        default:
+          return assertNever(setup, 'stream setup');
+      }
+    } catch (err) {
+      if (setup === 'unbuilt') {
+        this.voices = [];
+        this.streamSetup = 'failed';
+      }
+
+      log.error('speed_player.prepare_failed', { setup, speed }, err);
+
+      return 'failed';
+    }
   }
 
   private buildVoices(tracks: SpeedAudioTrack[]) {
@@ -229,8 +276,16 @@ export class SpeedAudioPlayer
     this.epoch += 1;
 
     const epoch = this.epoch;
+    const prepared = await this.prepared;
 
-    await this.prepared;
+    if (epoch !== this.epoch) {
+      return;
+    }
+
+    // Starting anyway would play a silent song with no error.
+    if (prepared !== 'prepared') {
+      throw new Error(`time-stretched audio not ready: ${prepared}`);
+    }
 
     const thawed =
       this.context.state === 'suspended' ? await this.thaw() : 'resumed';
