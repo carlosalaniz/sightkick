@@ -201,6 +201,8 @@ export function installFetchByByteLength(
     'fetch',
     vi.fn((url: string) =>
       Promise.resolve({
+        ok: true,
+        status: 200,
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(lengthForUrl(url))),
       }),
     ),

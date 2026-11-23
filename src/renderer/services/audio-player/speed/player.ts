@@ -185,11 +185,19 @@ export class SpeedAudioPlayer
   private prepare() {
     const speed = this._playbackSpeed;
 
-    this.prepared = this.ready.then(
-      (tracks) => this.prepareStream(tracks, speed),
-      // A load failure is reported by whoever awaits `ready` (the transport).
-      (): PrepareResult => 'not-loaded',
-    );
+    this.prepared = this.ready.then((loaded): PrepareResult => {
+      switch (loaded.kind) {
+        case 'loaded':
+          return this.prepareStream(loaded.tracks, speed);
+
+        case 'failed':
+          // Reported by whoever awaits `ready` (the transport).
+          return 'not-loaded';
+
+        default:
+          return assertNever(loaded, 'tracks load result');
+      }
+    });
   }
 
   private prepareStream(

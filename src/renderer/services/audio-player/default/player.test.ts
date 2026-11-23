@@ -396,4 +396,87 @@ describe('AudioPlayer', () => {
       );
     });
   });
+
+  describe('loading', () => {
+    beforeEach(() => {
+      vi.spyOn(log, 'error').mockImplementation(() => {});
+    });
+
+    it('loads every track with a bounded fetch', async () => {
+      const { player } = await makePlayer();
+
+      await expect(player.ready).resolves.toMatchObject({ kind: 'loaded' });
+      expect(vi.mocked(fetch).mock.calls[0][1]?.signal).toBeInstanceOf(
+        AbortSignal,
+      );
+    });
+
+    it('names an HTTP error with its status and url', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.resolve({ ok: false, status: 404 })),
+      );
+
+      const player = new DefaultAudioPlayer(TRACKS, vi.fn());
+
+      await expect(player.ready).resolves.toEqual({
+        kind: 'failed',
+        failure: { kind: 'http', url: 'drums.ogg', status: 404 },
+      });
+      expect(log.error).toHaveBeenCalledWith('audio.track_load_failed', {
+        kind: 'http',
+        url: 'drums.ogg',
+        status: 404,
+      });
+    });
+
+    it('names a fetch that timed out', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() =>
+          Promise.reject(new DOMException('signal timed out', 'TimeoutError')),
+        ),
+      );
+
+      const player = new DefaultAudioPlayer(TRACKS, vi.fn());
+
+      await expect(player.ready).resolves.toEqual({
+        kind: 'failed',
+        failure: { kind: 'timeout', url: 'drums.ogg' },
+      });
+    });
+
+    it('names a fetch that got no answer', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+      );
+
+      const player = new DefaultAudioPlayer(TRACKS, vi.fn());
+
+      await expect(player.ready).resolves.toEqual({
+        kind: 'failed',
+        failure: { kind: 'network', url: 'drums.ogg' },
+      });
+    });
+
+    it('names audio the browser cannot decode', async () => {
+      const error = new DOMException('Unable to decode', 'EncodingError');
+
+      context.decodeAudioData = () => Promise.reject(error);
+
+      const player = new DefaultAudioPlayer(TRACKS, vi.fn());
+
+      await expect(player.ready).resolves.toEqual({
+        kind: 'failed',
+        failure: { kind: 'decode', url: 'drums.ogg' },
+      });
+      expect(log.error).toHaveBeenCalledWith(
+        'audio.decode_failed',
+        { url: 'drums.ogg' },
+        error,
+      );
+      expect(player.duration).toBe(0);
+    });
+  });
 });

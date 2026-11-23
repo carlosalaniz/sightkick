@@ -47,7 +47,7 @@ const { MockAudioPlayer } = vi.hoisted(() => {
   class MockAudioPlayerImpl {
     static instances: MockAudioPlayerImpl[] = [];
     onEnded: () => void;
-    ready = Promise.resolve([]);
+    ready = Promise.resolve({ kind: 'loaded' as const, tracks: [] });
     context = fakeContext();
     audioTracks: { name: string; setVolume: () => void }[] = [];
     currentTime = 0;

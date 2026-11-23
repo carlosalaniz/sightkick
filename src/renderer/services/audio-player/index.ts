@@ -7,6 +7,8 @@ export type {
   SpeedControllableAudioPlayer,
   ThawResult,
   TrackConfig,
+  TrackLoadFailure,
+  TracksLoadResult,
 } from './types';
 
 export type { PlayerMode } from './factories';

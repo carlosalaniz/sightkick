@@ -17,6 +17,24 @@ export interface LoopWindow {
   end: number;
 }
 
+/**
+ * Why a song's audio file didn't load:
+ * - http: the server answered with an error status (a missing stem: 404).
+ * - network: no answer at all (offline, connection dropped, blocked).
+ * - timeout: no complete answer within the fetch timeout.
+ * - decode: the bytes arrived but aren't audio the browser can decode.
+ */
+export type TrackLoadFailure =
+  | { kind: 'http'; url: string; status: number }
+  | { kind: 'network'; url: string }
+  | { kind: 'timeout'; url: string }
+  | { kind: 'decode'; url: string };
+
+/** What loading a player's tracks came to. */
+export type TracksLoadResult<TTrack = unknown> =
+  | { kind: 'loaded'; tracks: TTrack[] }
+  | { kind: 'failed'; failure: TrackLoadFailure };
+
 /** How a suspend of the player's audio clock (wait mode's freeze) ended. */
 export type FreezeResult = 'frozen' | 'failed' | 'timed-out';
 
@@ -24,7 +42,8 @@ export type FreezeResult = 'frozen' | 'failed' | 'timed-out';
 export type ThawResult = 'resumed' | 'failed' | 'timed-out';
 
 export interface AudioPlayer {
-  ready: Promise<unknown>;
+  /** Settles once every track has loaded, or one has failed to. */
+  ready: Promise<TracksLoadResult>;
   context: AudioContext;
   audioTracks: AudioTrackHandle[];
   duration: number;

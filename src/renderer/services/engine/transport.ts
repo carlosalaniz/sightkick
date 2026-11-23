@@ -895,26 +895,45 @@ export class Transport {
     this.createdPlayer = player;
 
     player.ready
-      .then(() => {
+      .then((loaded) => {
         if (this.disposed) {
           return;
         }
 
-        this.audioPlayer = player;
-        this.speedPlayer = isSpeedControllable(player) ? player : undefined;
-        this.clickTrack = new ClickTrack(player.context);
-        this.clickTrack.setTone(this.clickTone);
-        this.syncPlayerLoop();
-        this.emit();
+        switch (loaded.kind) {
+          case 'loaded':
+            this.adoptPlayer(player);
+
+            return;
+
+          case 'failed':
+            // The player logged which file and why.
+            this.onErrorCb('load');
+
+            return;
+
+          default:
+            assertNever(loaded, 'tracks load result');
+        }
       })
       .catch((error) => {
         if (this.disposed) {
           return;
         }
 
+        // Not a named load failure: a bug, or memory running out mid-decode.
         log.error('transport.load_failed', {}, error);
         this.onErrorCb('load');
       });
+  }
+
+  private adoptPlayer(player: AudioPlayer): void {
+    this.audioPlayer = player;
+    this.speedPlayer = isSpeedControllable(player) ? player : undefined;
+    this.clickTrack = new ClickTrack(player.context);
+    this.clickTrack.setTone(this.clickTone);
+    this.syncPlayerLoop();
+    this.emit();
   }
 
   private startPolling(): void {

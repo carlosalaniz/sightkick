@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AudioPlayer, TrackConfig } from '../audio-player';
+import { AudioPlayer, TrackConfig, TracksLoadResult } from '../audio-player';
 import { Measure, ParsedChart } from '../../../chart-parser/types';
 import { Transport } from './transport';
 import { TransportContext } from './types';
@@ -78,7 +78,7 @@ class MockAudioPlayer {
   static instances: MockAudioPlayer[] = [];
   static failNext = false;
   onEnded: () => void;
-  ready: Promise<unknown>;
+  ready: Promise<TracksLoadResult>;
   context = fakeContext();
   audioTracks: { name: string; setVolume: () => void }[] = [];
   currentTime = 0;
@@ -124,10 +124,14 @@ class MockAudioPlayer {
 
   constructor(_trackData: TrackConfig[], onEnded: () => void) {
     this.onEnded = onEnded;
-    this.ready = MockAudioPlayer.failNext
-      ? Promise.reject(new Error('load failed'))
-      : Promise.resolve([]);
-    this.ready.catch(() => {});
+    this.ready = Promise.resolve(
+      MockAudioPlayer.failNext
+        ? {
+            kind: 'failed',
+            failure: { kind: 'http', url: 'd.ogg', status: 404 },
+          }
+        : { kind: 'loaded', tracks: [] },
+    );
     MockAudioPlayer.instances.push(this);
   }
 }
@@ -274,6 +278,7 @@ describe('Transport', () => {
 
     expect(engine.getSnapshot().isReady).toBe(false);
     expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith('load');
   });
 
   it('holds and releases playback in place for wait mode', async () => {

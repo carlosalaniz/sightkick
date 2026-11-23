@@ -1,5 +1,12 @@
 import { BaseAudioTrack } from './base-track';
-import { FreezeResult, LoopWindow, ThawResult, TrackConfig } from './types';
+import {
+  FreezeResult,
+  LoopWindow,
+  ThawResult,
+  TrackConfig,
+  TrackLoadFailure,
+  TracksLoadResult,
+} from './types';
 import { downmixToMono, trimTrailingSilence } from './helpers';
 import { log } from '../../../shared/log';
 import { TimeoutError, withTimeout } from '../../../shared/withTimeout';
@@ -16,11 +23,49 @@ const CONTEXT_STATE_TIMEOUT_MS = 2000;
 
 type StateChange = 'done' | 'failed' | 'timed-out';
 
+/**
+ * How long one audio file may take to download. A split song's stem is a few
+ * MB; this is generous for a slow mobile connection but ends a request that
+ * has stalled, instead of a song that never finishes loading.
+ */
+const FETCH_TIMEOUT_MS = 60_000;
+
+type FetchedAudio =
+  | { kind: 'fetched'; data: ArrayBuffer }
+  | { kind: 'failed'; failure: TrackLoadFailure };
+
+/** Fetches one audio file. The browser's errors stay here, named. */
+async function fetchAudio(url: string): Promise<FetchedAudio> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!res.ok) {
+      return {
+        kind: 'failed',
+        failure: { kind: 'http', url, status: res.status },
+      };
+    }
+
+    return { kind: 'fetched', data: await res.arrayBuffer() };
+  } catch (err) {
+    // AbortSignal.timeout aborts with a TimeoutError; anything else is the
+    // network (fetch rejects with a TypeError, whose text varies by browser).
+    const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
+
+    return {
+      kind: 'failed',
+      failure: timedOut ? { kind: 'timeout', url } : { kind: 'network', url },
+    };
+  }
+}
+
 export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   context: AudioContext;
   masterGain: GainNode;
   audioTracks: TTrack[] = [];
-  ready: Promise<TTrack[]>;
+  ready: Promise<TracksLoadResult<TTrack>>;
   duration: number = 0;
   isInitialised: boolean = false;
   protected startedAt: number = -1;
@@ -36,14 +81,18 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
     this.masterGain = this.context.createGain();
     this.masterGain.connect(this.context.destination);
     this.getMinDurationSeconds = getMinDurationSeconds;
-    this.ready = this.createTracks(trackConfigs);
-    this.ready
-      .then((tracks) => {
-        this.duration = Math.max(0, ...tracks.map((track) => track.duration));
+    this.ready = this.createTracks(trackConfigs).then((result) => {
+      if (result.kind === 'loaded') {
+        this.duration = Math.max(
+          0,
+          ...result.tracks.map((track) => track.duration),
+        );
+      } else {
+        log.error('audio.track_load_failed', { ...result.failure });
+      }
 
-        return this.duration;
-      })
-      .catch(() => {});
+      return result;
+    });
   }
 
   protected abstract createTrack(buffers: AudioBuffer[], name: string): TTrack;
@@ -54,15 +103,27 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
    * tablet's tab gets; one at a time, a subclass can shrink each track
    * (createTrack) before the next one is decoded.
    */
-  private async createTracks(trackConfigs: TrackConfig[]): Promise<TTrack[]> {
+  private async createTracks(
+    trackConfigs: TrackConfig[],
+  ): Promise<TracksLoadResult<TTrack>> {
     const tracks: TTrack[] = [];
 
     for (const { name, urls, mono } of trackConfigs) {
       const audioBuffers: AudioBuffer[] = [];
 
       for (const url of urls) {
-        const data = await fetch(url).then((res) => res.arrayBuffer());
-        const decoded = await this.context.decodeAudioData(data);
+        const fetched = await fetchAudio(url);
+
+        if (fetched.kind === 'failed') {
+          return fetched;
+        }
+
+        const decoded = await this.decode(url, fetched.data);
+
+        if (decoded === undefined) {
+          return { kind: 'failed', failure: { kind: 'decode', url } };
+        }
+
         const trimmed = trimTrailingSilence(
           decoded,
           this.context,
@@ -81,7 +142,21 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
       tracks.push(track);
     }
 
-    return tracks;
+    return { kind: 'loaded', tracks };
+  }
+
+  private async decode(
+    url: string,
+    data: ArrayBuffer,
+  ): Promise<AudioBuffer | undefined> {
+    try {
+      return await this.context.decodeAudioData(data);
+    } catch (err) {
+      // The browser's error text goes to the log only; callers get 'decode'.
+      log.error('audio.decode_failed', { url }, err);
+
+      return undefined;
+    }
   }
 
   pause(): void {
