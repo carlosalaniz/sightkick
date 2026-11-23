@@ -460,7 +460,6 @@ def cache_store(job: Job) -> None:
 def process(job: Job) -> None:
     global current_job
     current_job = job
-    job.set(status="running", stage="preparing", progress=1)
 
     # Decode (and mix, if several files were sent) to one 44.1 kHz WAV.
     mix = job.dir / "mix.wav"
@@ -514,9 +513,13 @@ def worker(stop: threading.Event) -> None:
             job_id = pending.get(timeout=THREAD_POLL_SECONDS)
         except queue.Empty:
             continue
-        job = jobs.get(job_id)
-        if not job or job.cancelled:
-            continue
+        with lock:
+            # Checked and claimed under the lock, so a cancel either beats the
+            # start (and the job never runs) or sees it running.
+            job = jobs.get(job_id)
+            if not job or job.cancelled:
+                continue
+            job.set(status="running", stage="preparing", progress=1)
         started = time.time()
         try:
             process(job)
@@ -698,16 +701,23 @@ def job_stem(job_id: str, name: str) -> FileResponse:
 @app.delete("/jobs/{job_id}")
 def cancel_job(job_id: str) -> dict:
     job = get_job(job_id)
+    # One lock for the whole decision: a request joining this job, or the
+    # worker starting it, must see either the job before the cancel or after
+    # it, never a job that is half cancelled.
     with lock:
         job.watchers -= 1
         if job.watchers > 0:
             # Another client still follows this job: only this one lets go.
             return {"id": job.id, "cancelled": True}
-    job.cancelled = True
-    if job.status == "queued":
-        job.set(status="cancelled", stage="cancelled")
-    if job.status != "running":
-        with lock:
+        job.cancelled = True
+        # A running job stops at the model's next chunk; the worker records it.
+        drop = job.status != "running"
+        if job.status == "queued":
+            job.set(status="cancelled", stage="cancelled")
+        if drop:
             jobs.pop(job.id, None)
+            if job.cache_key and inflight.get(job.cache_key) == job.id:
+                inflight.pop(job.cache_key, None)
+    if drop:
         shutil.rmtree(job.dir, ignore_errors=True)
     return {"id": job.id, "cancelled": True}

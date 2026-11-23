@@ -304,3 +304,47 @@ def test_old_cache_entries_gain_a_backing_track_without_splitting_again(client, 
     assert lib.runs == 1
     assert "backing" in json.loads(manifest_path.read_text())["stems"]
     assert client.get(f"/jobs/{again['id']}/stems/backing").status_code == 200
+
+
+def wait_for(condition, what: str) -> None:
+    for _ in range(200):
+        if condition():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def test_cancelling_a_running_job_stops_it_between_chunks(client, lib):
+    lib.gate = threading.Event()
+    job = post(client, wav_bytes(1100))
+    wait_for(lib.chunks_started.is_set, "the model to start")
+
+    assert client.delete(f"/jobs/{job['id']}").json() == {"id": job["id"], "cancelled": True}
+    lib.gate.set()
+    done = wait_done(client, job["id"])
+    assert done["status"] == "cancelled"
+    # Cancelled work leaves nothing in the cache: the same audio splits again.
+    lib.gate = None
+    again = post(client, wav_bytes(1100))
+    assert again["cached"] is False
+    assert wait_done(client, again["id"])["status"] == "done"
+
+
+def test_cancelling_a_queued_job_drops_it_before_it_runs(client, lib):
+    lib.gate = threading.Event()
+    running = post(client, wav_bytes(1200))
+    wait_for(lib.chunks_started.is_set, "the first job to start")
+    queued = post(client, wav_bytes(1201))
+    assert queued["status"] == "queued" and queued["queuePosition"] == 1
+
+    client.delete(f"/jobs/{queued['id']}")
+    assert client.get(f"/jobs/{queued['id']}").status_code == 404
+    lib.gate.set()
+    assert wait_done(client, running["id"])["status"] == "done"
+    assert lib.runs == 1
+
+    # The cancelled job no longer owns its audio: a new request starts fresh.
+    lib.gate = None
+    fresh = post(client, wav_bytes(1201))
+    assert fresh["id"] != queued["id"]
+    assert wait_done(client, fresh["id"])["status"] == "done"
