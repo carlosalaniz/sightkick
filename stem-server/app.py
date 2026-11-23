@@ -39,8 +39,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 MODELS = {
     "fast": os.environ.get("SK_FAST_MODEL", "htdemucs.yaml"),
@@ -100,11 +102,48 @@ KIT_PIECE_NAMES = {
 # play it instead of the separate stems, so they decode one file, not five.
 BACKING = "backing"
 
+# Version of the HTTP contract below (status JSON, error codes). Bump it only
+# for a change an existing client can't read.
+API_VERSION = 1
+
+# Why a job ended in "error", for clients to branch on, with the message we
+# show people. The raw cause (ffmpeg's stderr, the library's exception) only
+# goes to the server log, with the job id.
+JOB_ERROR_MESSAGES = {
+    "decode_failed": "Couldn't decode the uploaded audio",
+    "no_drums": "The model found no drums to split into a kit",
+    "model_unavailable": "The separation model couldn't be loaded",
+    "timed_out": "The split took too long and was stopped",
+    "internal": "The split failed on the server",
+}
+
+# HTTP error status -> the "code" sent next to "detail".
+HTTP_ERROR_CODES = {
+    400: "bad_request",
+    404: "not_found",
+    413: "too_large",
+    429: "busy",
+    503: "model_unavailable",
+}
+
 log = logging.getLogger("stem-server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 class Cancelled(Exception):
+    pass
+
+
+class JobFailed(Exception):
+    """An expected way for a job to fail; `code` is a key of JOB_ERROR_MESSAGES.
+    Raise it `from` the underlying error so the log keeps the details."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class FfmpegFailed(RuntimeError):
     pass
 
 
@@ -118,7 +157,9 @@ class Job:
     status: str = "queued"  # queued | running | done | error | cancelled
     stage: str = "queued"
     progress: float = 0.0
+    # Our message and code when status is "error"; see JOB_ERROR_MESSAGES.
     error: str | None = None
+    error_code: str | None = None
     stems: dict[str, Path] = field(default_factory=dict)
     cancelled: bool = False
     updated: float = field(default_factory=time.time)
@@ -153,6 +194,7 @@ class Job:
             "queuePosition": position,
             "stems": sorted(self.stems),
             "error": self.error,
+            "errorCode": self.error_code,
             "cached": self.cached,
         }
 
@@ -240,8 +282,10 @@ def get_separator(quality: str):
         )
         sep.load_model(model)
     except Exception as exc:
-        state.update(status="error", error=str(exc))
-        raise
+        # The library's text stays in the log; /health shows our own.
+        log.exception("Couldn't load %s model %s", quality, model)
+        state.update(status="error", error=f"{model} failed to load; see the server log")
+        raise JobFailed("model_unavailable") from exc
     install_progress_hooks()
     separators[quality] = sep
     state.update(status="ready")
@@ -252,7 +296,7 @@ def get_separator(quality: str):
 def run(cmd: list[str]) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"{cmd[0]} failed: {result.stderr.strip()[-500:]}")
+        raise FfmpegFailed(f"{cmd[0]} failed: {result.stderr.strip()[-500:]}")
 
 
 def stem_file_name(model_stem: str) -> str:
@@ -480,7 +524,10 @@ def process(job: Job) -> None:
     if len(job.inputs) > 1:
         cmd += ["-filter_complex", f"amix=inputs={len(job.inputs)}:normalize=0"]
     cmd += ["-ar", "44100", "-ac", "2", str(mix)]
-    run(cmd)
+    try:
+        run(cmd)
+    except FfmpegFailed as exc:
+        raise JobFailed("decode_failed") from exc
 
     named: list[tuple[str, Path]] = []
     if job.mode == "kit":
@@ -493,7 +540,7 @@ def process(job: Job) -> None:
         if both:
             drums = [w for name, w in named if name == "drums"]
             if not drums:
-                raise RuntimeError("The model found no drums to split")
+                raise JobFailed("no_drums")
             kit = separate(job, "kit", drums[0], job.dir / "kit", (60, 90))
             named += [(kit_file_name(w.stem), w) for w in kit]
 
@@ -514,7 +561,9 @@ def worker(stop: threading.Event) -> None:
     try:
         # Warm up the default preset so the first split doesn't wait for it.
         get_separator(DEFAULT_QUALITY)
-    except Exception:  # noqa: BLE001 - reported through /health
+    except JobFailed:
+        pass  # logged by get_separator and reported through /health
+    except Exception:  # noqa: BLE001 - the worker must keep serving other presets
         log.exception("Default model failed to load")
 
     while not stop.is_set():
@@ -538,9 +587,12 @@ def worker(stop: threading.Event) -> None:
         except Cancelled:
             job.set(status="cancelled", stage="cancelled")
             shutil.rmtree(job.dir, ignore_errors=True)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to the client
+        except JobFailed as exc:
+            log.error("Job %s failed: %s", job.id, exc.code, exc_info=exc.__cause__ or exc)
+            job.set(status="error", stage="error", error=JOB_ERROR_MESSAGES[exc.code], error_code=exc.code)
+        except Exception:  # noqa: BLE001 - any other failure is still a finished job
             log.exception("Job %s failed", job.id)
-            job.set(status="error", stage="error", error=str(exc))
+            job.set(status="error", stage="error", error=JOB_ERROR_MESSAGES["internal"], error_code="internal")
         finally:
             current_job = None
             with lock:
@@ -592,6 +644,20 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    # Every error response is {"detail": <our message>, "code": <HTTP_ERROR_CODES>}.
+    code = HTTP_ERROR_CODES.get(exc.status_code) or ("bad_request" if exc.status_code < 500 else "internal")
+    return JSONResponse({"detail": exc.detail, "code": code}, exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+    # FastAPI's own 422 body lists pydantic errors; send our message instead.
+    detail = "Send the audio as multipart 'files', with optional 'quality' and 'mode' fields"
+    return JSONResponse({"detail": detail, "code": "bad_request"}, 400)
+
+
 @app.middleware("http")
 async def private_network_access(request: Request, call_next):
     # Lets pages served from the internet (e.g. GitHub Pages) call this server
@@ -606,6 +672,7 @@ async def private_network_access(request: Request, call_next):
 def health() -> dict:
     return {
         "ok": any(model_states[q]["status"] != "error" for q in QUALITIES),
+        "apiVersion": API_VERSION,
         "defaultQuality": DEFAULT_QUALITY,
         "models": {
             key: {"model": MODELS[key], **model_states[key]}
@@ -630,7 +697,7 @@ async def create_job(
     needed = ([quality] if mode != "kit" else []) + (["kit"] if "kit" in mode else [])
     for key in needed:
         if model_states[key]["status"] == "error":
-            raise HTTPException(503, f"{MODELS[key]} failed to load: {model_states[key]['error']}")
+            raise HTTPException(503, f"{MODELS[key]} failed to load; see the server log")
     if not files:
         raise HTTPException(400, "Send at least one audio file")
 

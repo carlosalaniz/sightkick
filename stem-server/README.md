@@ -81,13 +81,38 @@ Stem names follow Clone Hero: the model's `piano` becomes `keys` and `other` bec
 
 | | |
 |---|---|
-| `GET /health` | `{ ok, defaultQuality, models: { fast, best, kit }, modes, queued, cache }` |
+| `GET /health` | `{ ok, apiVersion, defaultQuality, models: { fast, best, kit }, modes, queued, cache }` |
 | `POST /jobs` | multipart `files` (one or more audio files, mixed together), optional `quality` (`fast` or `best`) and optional `mode`: `stems` (default), `kit` (the upload is a drum track; returns `kit_kick`, `kit_snare`, `kit_toms`, `kit_hihat`, `kit_ride`, `kit_crash`) or `stems+kit` (both) → job |
-| `GET /jobs/{id}` | `{ status, stage, progress, queuePosition, stems, error, cached }` |
+| `GET /jobs/{id}` | `{ status, stage, progress, queuePosition, stems, error, errorCode, cached }` |
 | `GET /jobs/{id}/stems/{name}` | the stem as Ogg Vorbis |
 | `DELETE /jobs/{id}` | cancel and delete (cached stems are kept) |
 
 Jobs run one at a time. A `POST /jobs` that hits the cache comes back with `status: "done"` straight away. The port is bound to `127.0.0.1` in `docker-compose.yml`, so other machines on your network can't reach it.
+
+### Errors
+
+`apiVersion` in `/health` is the version of this contract (currently `1`). It changes only for a change an existing client can't read; new fields can appear without it.
+
+A job's `status` is `queued`, `running`, `done`, `error` or `cancelled`. When it's `error`, `errorCode` says why; otherwise it's `null`:
+
+| `errorCode` | Meaning |
+|---|---|
+| `decode_failed` | ffmpeg couldn't decode the uploaded audio |
+| `no_drums` | A `stems+kit` split found no drums to split into a kit |
+| `model_unavailable` | The model for this preset failed to load (or download) |
+| `timed_out` | The split ran past the server's time limit and was stopped |
+| `internal` | Anything else; the server log has the details |
+
+`error` is a short message for people, written by the server. It never contains ffmpeg's or the model library's own text, which goes to the server log with the job id. Clients should branch on `errorCode`, not on `error`, and treat a code they don't know as `internal`.
+
+Every HTTP error response is `{ "detail": "<message>", "code": "<code>" }`:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `bad_request` | Unknown `quality` or `mode`, no files, or a malformed form |
+| 404 | `not_found` | Unknown or expired job, or a stem the job doesn't have |
+| 413 | `too_large` | The upload is over `SK_MAX_UPLOAD_MB` |
+| 503 | `model_unavailable` | The model a request needs has failed to load |
 
 ## Tests
 

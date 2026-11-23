@@ -366,3 +366,80 @@ def test_cancelling_a_queued_job_drops_it_before_it_runs(client, lib):
     fresh = post(client, wav_bytes(1201))
     assert fresh["id"] != queued["id"]
     assert wait_done(client, fresh["id"])["status"] == "done"
+
+
+def test_a_failing_model_pass_reports_internal_without_the_library_text(client, lib):
+    lib.fail = RuntimeError("LIBRARY-TEXT: CUDA out of memory")
+    job = wait_done(client, post(client, wav_bytes(1300))["id"])
+    assert job["status"] == "error"
+    assert job["errorCode"] == "internal"
+    assert job["error"] == app.JOB_ERROR_MESSAGES["internal"]
+
+
+def test_audio_ffmpeg_cannot_decode_reports_decode_failed(client, lib):
+    job = wait_done(client, post(client, b"this is not audio")["id"])
+    assert job["status"] == "error"
+    assert job["errorCode"] == "decode_failed"
+    assert "ffmpeg" not in job["error"]
+    assert lib.runs == 0
+
+
+def test_a_kit_split_of_a_song_without_drums_reports_no_drums(client, lib):
+    lib.stems = ["Bass", "Vocals"]
+    job = wait_done(client, post(client, wav_bytes(1400), mode="stems+kit")["id"])
+    assert job["status"] == "error"
+    assert job["errorCode"] == "no_drums"
+
+
+def test_a_model_that_fails_to_load_fails_the_job_then_refuses_new_ones(client, lib):
+    lib.broken = {app.MODELS["best"]}
+    res = client.post(
+        "/jobs", files=[("files", ("song.wav", wav_bytes(1500), "audio/wav"))], data={"quality": "best"}
+    )
+    job = wait_done(client, res.json()["id"])
+    assert job["status"] == "error"
+    assert job["errorCode"] == "model_unavailable"
+    assert "LIBRARY-TEXT" not in json.dumps(client.get("/health").json())
+
+    again = client.post(
+        "/jobs", files=[("files", ("song.wav", wav_bytes(1501), "audio/wav"))], data={"quality": "best"}
+    )
+    assert again.status_code == 503
+    assert again.json()["code"] == "model_unavailable"
+    assert "LIBRARY-TEXT" not in again.text
+    # The other preset still works.
+    assert wait_done(client, post(client, wav_bytes(1502))["id"])["status"] == "done"
+
+
+def test_a_finished_job_has_no_error_code(client, lib):
+    job = wait_done(client, post(client, wav_bytes(1600))["id"])
+    assert job["status"] == "done"
+    assert job["error"] is None and job["errorCode"] is None
+
+
+def test_bad_requests_get_400_with_a_code(client, lib):
+    res = client.post("/jobs", files=[("files", ("a.wav", b"x", "audio/wav"))], data={"quality": "ultra"})
+    assert res.status_code == 400
+    assert res.json()["code"] == "bad_request"
+    assert "quality" in res.json()["detail"]
+
+    missing = client.post("/jobs", data={"quality": "fast"})
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "bad_request"
+    assert isinstance(missing.json()["detail"], str)
+
+
+def test_unknown_jobs_and_stems_get_404_with_a_code(client, lib):
+    res = client.get("/jobs/nope")
+    assert res.status_code == 404
+    assert res.json() == {"detail": "Unknown or expired job", "code": "not_found"}
+
+    job = wait_done(client, post(client, wav_bytes(1700))["id"])
+    stem = client.get(f"/jobs/{job['id']}/stems/tuba")
+    assert stem.status_code == 404
+    assert stem.json()["code"] == "not_found"
+    assert client.delete("/jobs/nope").json()["code"] == "not_found"
+
+
+def test_health_reports_the_api_version(client, lib):
+    assert client.get("/health").json()["apiVersion"] == 1
