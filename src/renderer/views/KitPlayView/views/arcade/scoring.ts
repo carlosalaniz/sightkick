@@ -439,7 +439,7 @@ export function formatPercent(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
 }
 
-/** One sentence about the player's timing lean, as on the mock's results card. */
+/** One sentence about the player's timing lean, for the results card. */
 export function timingLean(summary: Summary): string {
   if (Math.abs(summary.avgMs) > 15) {
     return `You lean ${Math.round(Math.abs(summary.avgMs))} ms ${

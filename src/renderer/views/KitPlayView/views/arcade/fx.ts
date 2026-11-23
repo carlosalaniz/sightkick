@@ -239,7 +239,7 @@ export class GemPools {
   }
 }
 
-/** A rolling row of early / late ticks (the mock's timing strip). */
+/** A rolling row of early / late ticks, drawn inside an `ErrorMeter`. */
 export class ErrorTicks {
   private next = 0;
 

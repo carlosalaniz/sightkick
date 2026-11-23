@@ -1,5 +1,9 @@
 import { assertNever } from '../../../../../shared/assertNever';
-/** SVG geometry of the staff, in viewBox units (the mock's 1200-wide staff). */
+
+/**
+ * SVG geometry of the staff, in viewBox units. The staff is drawn 1200 wide
+ * and the SVG scales it to its container, so every x below is in these units.
+ */
 
 export const VIEW_W = 1200;
 

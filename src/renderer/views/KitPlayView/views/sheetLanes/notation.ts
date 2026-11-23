@@ -1,6 +1,6 @@
 /**
- * Simplified drum notation for one bar, the way the mock draws it: notes are
- * grouped per beat, hands stem up, the kick stems down, notes in a beat share
+ * Simplified drum notation for one bar, enough to read at a glance while
+ * playing rather than a full engraving: notes are grouped per beat, hands stem up, the kick stems down, notes in a beat share
  * a beam (two when there are sixteenths) and a lone off-beat note gets a flag.
  */
 

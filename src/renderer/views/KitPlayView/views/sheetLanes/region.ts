@@ -5,7 +5,7 @@ import {
 } from '../../../../kit';
 import { barRangeLabel, prettySectionName } from '../shared/sections';
 
-/** Bars per practice window (the mock's 4-bar groove). */
+/** Bars per practice window: a 4-bar phrase, the usual length of a groove. */
 export const WINDOW_BARS = 4;
 
 /** A bar range of the song, `end` exclusive (indices into `session.bars`). */
