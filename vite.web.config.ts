@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { readFileSync } from 'fs';
 import { buildInfo } from './scripts/build-info';
+import { stampServiceWorker } from './src/web/serviceWorkerBuild';
 
 const build = buildInfo();
 
@@ -28,19 +29,26 @@ export default defineConfig({
       },
     },
     {
-      // The service worker that makes the app installable, stamped with the
-      // build so each deploy replaces the previous worker and its cache.
+      // The service worker that makes the app installable and open offline,
+      // stamped with the build so each deploy replaces the previous worker
+      // and its cache, and with the build's hashed files to cache at install.
+      // 'post' so the bundle it lists is complete.
       name: 'sightkick-service-worker',
-      generateBundle() {
+      enforce: 'post',
+      generateBundle(_options, bundle) {
         const id = `${build.commit.slice(0, 12)}-${Date.now().toString(36)}`;
 
         this.emitFile({
           type: 'asset',
           fileName: 'sw.js',
-          source: readFileSync(
-            path.resolve(__dirname, 'src/web/service-worker.js'),
-            'utf8',
-          ).replaceAll('__SK_BUILD_ID__', id),
+          source: stampServiceWorker(
+            readFileSync(
+              path.resolve(__dirname, 'src/web/service-worker.js'),
+              'utf8',
+            ),
+            id,
+            Object.keys(bundle),
+          ),
         });
       },
     },

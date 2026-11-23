@@ -3,7 +3,8 @@ import { log } from '../shared/log';
 
 /**
  * Registers the service worker (sw.js, built from service-worker.js) that
- * makes SightKick installable and lets it open offline. Production builds
+ * makes SightKick installable and lets it open offline: it caches the
+ * build's files when it installs. Production builds
  * only: in development it would cache files Vite serves fresh on every edit.
  */
 export function registerServiceWorker(
