@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { JudgmentLog } from './log';
 import { buildResults } from './results';
 import {
+  ArcadeGrade,
+  ArcadeTierId,
   applyHit,
   applyMiss,
   ARCADE_RULES,
@@ -18,7 +20,10 @@ import {
   SPIRIT_START,
   starsFor,
   summarize,
-  tierIndex,
+  gradeHit,
+  gemState,
+  hitRing,
+  tierById,
   timingLean,
   updateFever,
 } from './scoring';
@@ -39,33 +44,78 @@ const hits = (
   let s = state;
 
   for (let i = 0; i < n; i += 1) {
-    s = applyHit(s, rules, tier, ctx({ time: i * 0.25 }));
+    s = applyHit(s, rules, rules.tiers[tier], ctx({ time: i * 0.25 }));
   }
 
   return s;
 };
+const hit = (tier: ArcadeTierId, offsetMs = 0): ArcadeGrade => ({
+  kind: 'hit',
+  tier,
+  offsetMs,
+});
+const MISS: ArcadeGrade = { kind: 'miss' };
 const judgment = (over: Partial<Judgment>): Judgment => ({
   ...ctx(),
   noteId: 'n',
   voice: 'snare',
   pieceId: 'sn',
-  tier: 0,
-  offsetMs: 0,
+  grade: hit('perfect'),
   ...over,
 });
 
-describe('tierIndex', () => {
+describe('gradeHit', () => {
+  const grade = (rules: typeof ARCADE_RULES, offset: number) =>
+    gradeHit(rules, offset).id;
+
   it('grades by absolute offset in ms', () => {
-    expect(tierIndex(ARCADE_RULES, 0.01)).toBe(0);
-    expect(tierIndex(ARCADE_RULES, -0.025)).toBe(0);
-    expect(tierIndex(ARCADE_RULES, 0.04)).toBe(1);
-    expect(tierIndex(ARCADE_RULES, -0.09)).toBe(2);
-    expect(tierIndex(ARCADE_RULES, 0.2)).toBe(2);
+    expect(grade(ARCADE_RULES, 0.01)).toBe('perfect');
+    expect(grade(ARCADE_RULES, -0.025)).toBe('perfect');
+    expect(grade(ARCADE_RULES, 0.04)).toBe('great');
+    expect(grade(ARCADE_RULES, -0.09)).toBe('good');
+    expect(grade(ARCADE_RULES, 0.2)).toBe('good');
   });
 
   it('uses the 35 ms Perfect window on Play', () => {
-    expect(tierIndex(PLAY_RULES, 0.034)).toBe(0);
-    expect(tierIndex(PLAY_RULES, 0.036)).toBe(1);
+    expect(grade(PLAY_RULES, 0.034)).toBe('perfect');
+    expect(grade(PLAY_RULES, 0.036)).toBe('good');
+  });
+
+  it('ends every rules table in an unbounded tier', () => {
+    for (const rules of [ARCADE_RULES, PLAY_RULES]) {
+      expect(rules.tiers[rules.tiers.length - 1].maxMs).toBe(Infinity);
+    }
+  });
+
+  it('throws on an offset no tier can hold', () => {
+    expect(() => gradeHit(ARCADE_RULES, NaN)).toThrow();
+  });
+});
+
+describe('tierById', () => {
+  it('throws for a tier the rules lack', () => {
+    expect(tierById(ARCADE_RULES, 'great').points).toBe(70);
+    expect(() => tierById(PLAY_RULES, 'great')).toThrow();
+  });
+});
+
+describe('gemState', () => {
+  it('names open, hit and missed notes', () => {
+    expect(gemState(undefined)).toBe('open');
+    expect(gemState(judgment({}))).toBe('hit');
+    expect(gemState(judgment({ grade: MISS }))).toBe('missed');
+  });
+});
+
+describe('hitRing', () => {
+  it('draws a big tier-colored ring only for a perfect hit', () => {
+    const [perfect, great] = ARCADE_RULES.tiers;
+
+    expect(hitRing(perfect, '#pad')).toEqual({
+      color: perfect.color,
+      big: true,
+    });
+    expect(hitRing(great, '#pad')).toEqual({ color: '#pad', big: false });
   });
 });
 
@@ -80,9 +130,15 @@ describe('hitLabel', () => {
 
 describe('arcade scoring', () => {
   it('scores tiers 100 / 70 / 40 at ×1', () => {
-    expect(applyHit(INITIAL_SCORE, ARCADE_RULES, 0, ctx()).score).toBe(100);
-    expect(applyHit(INITIAL_SCORE, ARCADE_RULES, 1, ctx()).score).toBe(70);
-    expect(applyHit(INITIAL_SCORE, ARCADE_RULES, 2, ctx()).score).toBe(40);
+    expect(
+      applyHit(INITIAL_SCORE, ARCADE_RULES, ARCADE_RULES.tiers[0], ctx()).score,
+    ).toBe(100);
+    expect(
+      applyHit(INITIAL_SCORE, ARCADE_RULES, ARCADE_RULES.tiers[1], ctx()).score,
+    ).toBe(70);
+    expect(
+      applyHit(INITIAL_SCORE, ARCADE_RULES, ARCADE_RULES.tiers[2], ctx()).score,
+    ).toBe(40);
   });
 
   it('steps the multiplier every 10 in a row, up to ×4', () => {
@@ -105,7 +161,12 @@ describe('arcade scoring', () => {
   });
 
   it('moves Spirit up on hits and down on misses, within 0–1', () => {
-    const up = applyHit(INITIAL_SCORE, ARCADE_RULES, 0, ctx());
+    const up = applyHit(
+      INITIAL_SCORE,
+      ARCADE_RULES,
+      ARCADE_RULES.tiers[0],
+      ctx(),
+    );
 
     expect(up.spirit).toBeCloseTo(SPIRIT_START + 0.02);
     expect(applyMiss(INITIAL_SCORE, ARCADE_RULES, 0).spirit).toBeCloseTo(
@@ -127,21 +188,26 @@ describe('Fever', () => {
   const full: ScoreState = { ...INITIAL_SCORE, meter: 1 };
 
   it('fills the meter per tier and drains it on a miss', () => {
-    expect(applyHit(INITIAL_SCORE, ARCADE_RULES, 0, ctx()).meter).toBeCloseTo(
-      0.024,
-    );
+    expect(
+      applyHit(INITIAL_SCORE, ARCADE_RULES, ARCADE_RULES.tiers[0], ctx()).meter,
+    ).toBeCloseTo(0.024);
     expect(
       applyMiss({ ...INITIAL_SCORE, meter: 0.5 }, ARCADE_RULES, 0).meter,
     ).toBeCloseTo(0.46);
   });
 
   it('waits at full for a crash when the kit has one', () => {
-    const snare = applyHit(full, ARCADE_RULES, 0, ctx());
+    const snare = applyHit(full, ARCADE_RULES, ARCADE_RULES.tiers[0], ctx());
 
     expect(snare.fever).toBe(false);
     expect(snare.meter).toBe(1);
 
-    const crash = applyHit(full, ARCADE_RULES, 0, ctx({ isCrash: true }));
+    const crash = applyHit(
+      full,
+      ARCADE_RULES,
+      ARCADE_RULES.tiers[0],
+      ctx({ isCrash: true }),
+    );
 
     expect(crash.fever).toBe(true);
     expect(crash.feverEnd).toBe(5);
@@ -149,13 +215,28 @@ describe('Fever', () => {
 
   it('starts on any hit when the kit has no crash', () => {
     expect(
-      applyHit(full, ARCADE_RULES, 2, ctx({ hasCrash: false })).fever,
+      applyHit(
+        full,
+        ARCADE_RULES,
+        ARCADE_RULES.tiers[2],
+        ctx({ hasCrash: false }),
+      ).fever,
     ).toBe(true);
   });
 
   it('doubles points and the shown multiplier, then runs out', () => {
-    const on = applyHit(full, ARCADE_RULES, 0, ctx({ isCrash: true }));
-    const next = applyHit(on, ARCADE_RULES, 0, ctx({ time: 2 }));
+    const on = applyHit(
+      full,
+      ARCADE_RULES,
+      ARCADE_RULES.tiers[0],
+      ctx({ isCrash: true }),
+    );
+    const next = applyHit(
+      on,
+      ARCADE_RULES,
+      ARCADE_RULES.tiers[0],
+      ctx({ time: 2 }),
+    );
 
     expect(next.score - on.score).toBe(200);
     expect(displayMultiplier(next)).toBe(2);
@@ -167,9 +248,10 @@ describe('Fever', () => {
     expect(off.fever).toBe(false);
     expect(off.meter).toBe(0);
     // A hit after the end scores normally again.
-    expect(applyHit(next, ARCADE_RULES, 0, ctx({ time: 6 })).score).toBe(
-      next.score + 100,
-    );
+    expect(
+      applyHit(next, ARCADE_RULES, ARCADE_RULES.tiers[0], ctx({ time: 6 }))
+        .score,
+    ).toBe(next.score + 100);
   });
 
   it('is off in Play', () => {
@@ -182,7 +264,9 @@ describe('Fever', () => {
 
 describe('Play scoring', () => {
   it('scores 100 / 50 times 1 + streak / 10, reset by a miss', () => {
-    expect(applyHit(INITIAL_SCORE, PLAY_RULES, 1, ctx()).score).toBe(50);
+    expect(
+      applyHit(INITIAL_SCORE, PLAY_RULES, PLAY_RULES.tiers[1], ctx()).score,
+    ).toBe(50);
 
     const s = hits(INITIAL_SCORE, 10, 0, PLAY_RULES);
 
@@ -197,10 +281,10 @@ describe('summarize', () => {
   it('weights accuracy by tier and keeps timing stats over hits only', () => {
     const s = summarize(
       [
-        judgment({ tier: 0, offsetMs: 10 }),
-        judgment({ tier: 1, offsetMs: -30 }),
-        judgment({ tier: 2, offsetMs: 80 }),
-        judgment({ tier: -1 }),
+        judgment({ grade: hit('perfect', 10) }),
+        judgment({ grade: hit('great', -30) }),
+        judgment({ grade: hit('good', 80) }),
+        judgment({ grade: MISS }),
       ],
       ARCADE_RULES,
     );
@@ -225,18 +309,23 @@ describe('summarize', () => {
 describe('replay', () => {
   it('rebuilds the same state as applying judgments live', () => {
     const list = [
-      judgment({ noteId: 'a', tier: 0, time: 1 }),
-      judgment({ noteId: 'b', tier: 2, time: 1.5 }),
-      judgment({ noteId: 'c', tier: -1, time: 2 }),
-      judgment({ noteId: 'd', tier: 1, time: 2.5 }),
+      judgment({ noteId: 'a', grade: hit('perfect'), time: 1 }),
+      judgment({ noteId: 'b', grade: hit('good'), time: 1.5 }),
+      judgment({ noteId: 'c', grade: MISS, time: 2 }),
+      judgment({ noteId: 'd', grade: hit('great'), time: 2.5 }),
     ];
     let live = INITIAL_SCORE;
 
     for (const j of list) {
       live =
-        j.tier < 0
+        j.grade.kind === 'miss'
           ? applyMiss(live, ARCADE_RULES, j.time)
-          : applyHit(live, ARCADE_RULES, j.tier, j);
+          : applyHit(
+              live,
+              ARCADE_RULES,
+              tierById(ARCADE_RULES, j.grade.tier),
+              j,
+            );
     }
 
     expect(replay(list, ARCADE_RULES)).toEqual(live);
@@ -251,7 +340,7 @@ describe('replay', () => {
     });
     log.add(judgment({ noteId: 'a', time: 1 }));
     log.add(judgment({ noteId: 'b', time: 2 }));
-    log.add(judgment({ noteId: 'c', time: 3, tier: -1 }));
+    log.add(judgment({ noteId: 'c', time: 3, grade: MISS }));
 
     expect(log.summary().judged).toBe(3);
 
@@ -317,9 +406,19 @@ describe('results helpers', () => {
     ];
     const r = buildResults(
       [
-        judgment({ noteId: 'a', time: 1, pieceId: 'sn', tier: 0 }),
-        judgment({ noteId: 'b', time: 11, pieceId: 'kk', tier: -1 }),
-        judgment({ noteId: 'c', time: 12, pieceId: 'sn', tier: 0 }),
+        judgment({
+          noteId: 'a',
+          time: 1,
+          pieceId: 'sn',
+          grade: hit('perfect'),
+        }),
+        judgment({ noteId: 'b', time: 11, pieceId: 'kk', grade: MISS }),
+        judgment({
+          noteId: 'c',
+          time: 12,
+          pieceId: 'sn',
+          grade: hit('perfect'),
+        }),
       ],
       ARCADE_RULES,
       INITIAL_SCORE,

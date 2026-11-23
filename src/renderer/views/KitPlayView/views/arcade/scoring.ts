@@ -4,11 +4,14 @@ import {
   multiplierAfterMiss,
   MultiplierRule,
 } from '../shared/multiplier';
+import { assertNever } from '../../../../../shared/assertNever';
 import { Voice } from '../../../../kit';
+
+export type ArcadeTierId = 'perfect' | 'great' | 'good';
 
 /** One grade of a hit, by how far it landed from the note. */
 export interface Tier {
-  id: 'perfect' | 'great' | 'good';
+  id: ArcadeTierId;
   label: string;
   /** Upper bound of |offset| for this tier, in ms. The last tier takes the rest of the hit window. */
   maxMs: number;
@@ -123,12 +126,31 @@ export function clamp(x: number, lo = 0, hi = 1): number {
   return Math.max(lo, Math.min(hi, x));
 }
 
-/** Tier index for a hit `offsetSeconds` from its note. */
-export function tierIndex(rules: ScoringRules, offsetSeconds: number): number {
+/**
+ * The tier of a hit `offsetSeconds` from its note. Every rules table ends in
+ * a tier with no upper bound, so nothing a judge reports falls through; an
+ * offset that does (NaN) is a bug, not a grade.
+ */
+export function gradeHit(rules: ScoringRules, offsetSeconds: number): Tier {
   const ms = Math.abs(offsetSeconds * 1000);
-  const i = rules.tiers.findIndex((t) => ms <= t.maxMs);
+  const tier = rules.tiers.find((t) => ms <= t.maxMs);
 
-  return i === -1 ? rules.tiers.length - 1 : i;
+  if (!tier) {
+    throw new Error(`No tier for a hit ${offsetSeconds} s off`);
+  }
+
+  return tier;
+}
+
+/** The tier `id` of these rules; a judgment from other rules is a bug. */
+export function tierById(rules: ScoringRules, id: ArcadeTierId): Tier {
+  const tier = rules.tiers.find((t) => t.id === id);
+
+  if (!tier) {
+    throw new Error(`These scoring rules have no ${id} tier`);
+  }
+
+  return tier;
 }
 
 /** The judgment pop for a hit: the tier label, or Early / Late. */
@@ -138,6 +160,29 @@ export function hitLabel(tier: Tier, offsetSeconds: number): string {
   }
 
   return offsetSeconds < 0 ? 'Early' : 'Late';
+}
+
+/**
+ * The ring a hit draws on its lane: big and in the tier's color for a
+ * perfect hit, small and in the pad's color otherwise.
+ */
+export function hitRing(
+  tier: Tier,
+  padColor: string,
+): { color: string; big: boolean } {
+  switch (tier.id) {
+    case 'perfect':
+      return { color: tier.color, big: true };
+
+    case 'great':
+      return { color: padColor, big: false };
+
+    case 'good':
+      return { color: padColor, big: false };
+
+    default:
+      return assertNever(tier.id, 'arcade tier');
+  }
 }
 
 export interface ScoreState {
@@ -189,10 +234,9 @@ export function updateFever(state: ScoreState, now: number): ScoreState {
 export function applyHit(
   state: ScoreState,
   rules: ScoringRules,
-  tierIdx: number,
+  tier: Tier,
   ctx: HitContext,
 ): ScoreState {
-  const tier = rules.tiers[tierIdx];
   const s = updateFever(state, ctx.time);
   const streak = s.streak + 1;
   const mult = multiplierAfterHit(rules.multiplier, s.mult, streak);
@@ -250,16 +294,55 @@ export function displayMultiplier(state: ScoreState): number {
   return state.mult * (state.fever ? 2 : 1);
 }
 
-/** One judged note. `tier` is -1 for a miss. */
+/** What became of one note: hit in a tier (`offsetMs` < 0 is early) or missed. */
+export type ArcadeGrade =
+  | { kind: 'hit'; tier: ArcadeTierId; offsetMs: number }
+  | { kind: 'miss' };
+
+/** One judged note. */
 export interface Judgment extends HitContext {
   noteId: string;
   voice: Voice;
   pieceId: string;
-  tier: number;
-  offsetMs: number;
+  grade: ArcadeGrade;
 }
 
-export const isMiss = (j: Pick<Judgment, 'tier'>) => j.tier < 0;
+/** How a view draws a note's gem: not judged yet, hit (gone) or missed (faded). */
+export type GemState = 'open' | 'hit' | 'missed';
+
+export function gemState(j: Judgment | undefined): GemState {
+  if (!j) {
+    return 'open';
+  }
+
+  switch (j.grade.kind) {
+    case 'hit':
+      return 'hit';
+
+    case 'miss':
+      return 'missed';
+
+    default:
+      return assertNever(j.grade, 'arcade grade');
+  }
+}
+
+function applyJudgment(
+  s: ScoreState,
+  rules: ScoringRules,
+  j: Judgment,
+): ScoreState {
+  switch (j.grade.kind) {
+    case 'hit':
+      return applyHit(s, rules, tierById(rules, j.grade.tier), j);
+
+    case 'miss':
+      return applyMiss(s, rules, j.time);
+
+    default:
+      return assertNever(j.grade, 'arcade grade');
+  }
+}
 
 /** Rebuilds the score from judgments in the order they happened. */
 export function replay(
@@ -269,7 +352,7 @@ export function replay(
   let s = INITIAL_SCORE;
 
   for (const j of judgments) {
-    s = isMiss(j) ? applyMiss(s, rules, j.time) : applyHit(s, rules, j.tier, j);
+    s = applyJudgment(s, rules, j);
   }
 
   return s;
@@ -301,17 +384,29 @@ export function summarize(
   for (const j of judgments) {
     judged += 1;
 
-    if (isMiss(j)) {
-      counts[rules.tiers.length] += 1;
+    const { grade } = j;
 
-      continue;
+    switch (grade.kind) {
+      case 'hit': {
+        const tier = tierById(rules, grade.tier);
+
+        counts[rules.tiers.indexOf(tier)] += 1;
+        credit += tier.weight;
+        hits += 1;
+        sum += grade.offsetMs;
+        sumSq += grade.offsetMs * grade.offsetMs;
+
+        break;
+      }
+
+      case 'miss':
+        counts[rules.tiers.length] += 1;
+
+        break;
+
+      default:
+        assertNever(grade, 'arcade grade');
     }
-
-    counts[j.tier] += 1;
-    credit += rules.tiers[j.tier].weight;
-    hits += 1;
-    sum += j.offsetMs;
-    sumSq += j.offsetMs * j.offsetMs;
   }
 
   const avgMs = hits ? sum / hits : 0;

@@ -31,7 +31,9 @@ import {
   displayMultiplier,
   feverLevel,
   formatPercent,
+  gemState,
   hitLabel,
+  hitRing,
   MISS_COLOR,
   SPIRIT_PASS,
 } from './arcade/scoring';
@@ -98,14 +100,16 @@ export function RailsView({ session }: { session: PlaySession }) {
   const { notes, bars, pieceByVoice, engine } = session;
   const windowMs = engine.hitTolerance * 1000;
   const arcade = useArcade(session, ARCADE_RULES, {
-    onHit: (_note, piece, tier, offset) => {
-      const t = ARCADE_RULES.tiers[tier];
+    onHit: (_note, piece, t, offset) => {
       const y = laneY.get(piece.id);
 
       if (y !== undefined) {
         flashPiece(svgRef.current, piece.id, 0.5, 240, 'data-lane');
         flashPiece(svgRef.current, piece.id, 1, 320, 'data-curve');
-        ringAt(fxRef.current, XH, y, RT, tier ? piece.color : t.color, !tier);
+
+        const ring = hitRing(t, piece.color);
+
+        ringAt(fxRef.current, XH, y, RT, ring.color, ring.big);
       }
 
       popJudgment(judgeRef.current, hitLabel(t, offset), t.color);
@@ -155,9 +159,9 @@ export function RailsView({ session }: { session: PlaySession }) {
     ) {
       const note = notes[i];
       const piece = pieceByVoice.get(note.voice);
-      const j = log.get(note.id);
+      const gem = gemState(log.get(note.id));
 
-      if (!piece || (j && j.tier >= 0)) {
+      if (!piece || gem === 'hit') {
         continue;
       }
 
@@ -165,7 +169,7 @@ export function RailsView({ session }: { session: PlaySession }) {
       const o =
         clamp((1.05 - t) / 0.12) *
         (t < 0 ? clamp(1 + t / 0.12) : 1) *
-        (j ? 0.3 : 1);
+        (gem === 'missed' ? 0.3 : 1);
       const x = (XH + (W - XH) * t).toFixed(2);
 
       if (piece === kick) {

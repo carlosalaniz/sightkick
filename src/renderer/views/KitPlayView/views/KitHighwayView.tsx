@@ -17,7 +17,12 @@ import {
 } from './arcade/ArcadeUi';
 import { floatText, GemPools, setAttr, setText } from './arcade/fx';
 import { forEachBeat, poolSizes } from './arcade/helpers';
-import { formatPercent, hitLabel, PLAY_RULES } from './arcade/scoring';
+import {
+  formatPercent,
+  gemState,
+  hitLabel,
+  PLAY_RULES,
+} from './arcade/scoring';
 import { SheetStrip } from './arcade/SheetStrip';
 import {
   GemPool,
@@ -124,9 +129,8 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
   );
   const { notes, bars, pieceByVoice, song } = session;
   const arcade = useArcade(session, PLAY_RULES, {
-    onHit: (_note, piece, tier, offset) => {
+    onHit: (_note, piece, info, offset) => {
       const t = targets.get(piece.id);
-      const info = PLAY_RULES.tiers[tier];
 
       if (t) {
         floatText(
@@ -194,9 +198,9 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
       const note = notes[i];
       const piece = pieceByVoice.get(note.voice);
       const t = piece && targets.get(piece.id);
-      const j = log.get(note.id);
+      const gem = gemState(log.get(note.id));
 
-      if (!piece || !t || (j && j.tier >= 0)) {
+      if (!piece || !t || gem === 'hit') {
         continue;
       }
 
@@ -209,7 +213,7 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
 
       let o = 1;
 
-      if (j) {
+      if (gem === 'missed') {
         o = 0.25;
       } else if (y > t.y) {
         o = Math.max(0, 1 - (y - t.y) / 6);
@@ -219,7 +223,7 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
 
       const prev = nearest.get(piece.id);
 
-      if (dt > 0 && !j && (prev === undefined || dt < prev)) {
+      if (dt > 0 && gem === 'open' && (prev === undefined || dt < prev)) {
         nearest.set(piece.id, dt);
       }
     }

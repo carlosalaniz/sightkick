@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { assertNever } from '../../../../../shared/assertNever';
 import { firstNoteAtOrAfter, TimelineNote, VOICE_INFO } from '../../../../kit';
 import { useAnimationFrame } from '../../hooks';
 import { barIndexAt, sectionIndexAt } from './helpers';
 import { makeSvg, setAttr } from './fx';
-import { MISS_SHEET_COLOR } from './scoring';
+import {
+  ArcadeGrade,
+  MISS_SHEET_COLOR,
+  ScoringRules,
+  tierById,
+} from './scoring';
 import { Arcade } from './useArcade';
 
 const SX0 = 56;
@@ -125,7 +131,8 @@ export function SheetStrip({ arcade }: { arcade: Arcade }) {
           continue;
         }
 
-        const miss = j.tier < 0;
+        const { grade } = j;
+        const miss = grade.kind === 'miss';
 
         makeSvg(
           'circle',
@@ -133,7 +140,7 @@ export function SheetStrip({ arcade }: { arcade: Arcade }) {
             cx: h.x.toFixed(1),
             cy: 94,
             r: 2.8,
-            fill: miss ? MISS_SHEET_COLOR : rules.tiers[j.tier].sheetColor,
+            fill: sheetMarkColor(rules, grade),
           },
           g,
         );
@@ -343,4 +350,17 @@ export function SheetStrip({ arcade }: { arcade: Arcade }) {
       </svg>
     </div>
   );
+}
+
+function sheetMarkColor(rules: ScoringRules, grade: ArcadeGrade): string {
+  switch (grade.kind) {
+    case 'hit':
+      return tierById(rules, grade.tier).sheetColor;
+
+    case 'miss':
+      return MISS_SHEET_COLOR;
+
+    default:
+      return assertNever(grade, 'arcade grade');
+  }
 }

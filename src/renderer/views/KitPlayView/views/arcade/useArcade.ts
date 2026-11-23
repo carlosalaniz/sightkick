@@ -18,6 +18,7 @@ import { ArcadeResults, buildResults } from './results';
 import {
   applyHit,
   applyMiss,
+  gradeHit,
   formatOffset,
   formatPercent,
   HitContext,
@@ -26,7 +27,7 @@ import {
   ScoreState,
   ScoringRules,
   summarize,
-  tierIndex,
+  Tier,
   updateFever,
 } from './scoring';
 
@@ -50,7 +51,7 @@ export interface ArcadeFx {
   onHit?: (
     note: TimelineNote,
     piece: KitPiece,
-    tier: number,
+    tier: Tier,
     offsetSeconds: number,
   ) => void;
   onMiss?: (note: TimelineNote, piece: KitPiece) => void;
@@ -143,7 +144,7 @@ export function useArcade(
         return;
       }
 
-      const tier = tierIndex(rules, offsetSeconds);
+      const tier = gradeHit(rules, offsetSeconds);
       const ctx = context(note);
       const before = score.current;
 
@@ -153,8 +154,7 @@ export function useArcade(
         noteId: note.id,
         voice: note.voice,
         pieceId: piece.id,
-        tier,
-        offsetMs: offsetSeconds * 1000,
+        grade: { kind: 'hit', tier: tier.id, offsetMs: offsetSeconds * 1000 },
       });
 
       if (!before.fever && score.current.fever) {
@@ -178,8 +178,7 @@ export function useArcade(
         noteId: note.id,
         voice: note.voice,
         pieceId: piece.id,
-        tier: -1,
-        offsetMs: 0,
+        grade: { kind: 'miss' },
       });
       fxRef.current.onMiss?.(note, piece);
     },
