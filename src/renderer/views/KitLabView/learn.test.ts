@@ -4,9 +4,9 @@ import {
   controlChipText,
   controlNoun,
   fallbackVoices,
-  keyName,
   unlearnedQueue,
 } from './learn';
+import { keyName } from '../../kit';
 import { createPiece, removePiece } from './kitEdits';
 
 const EKIT = DEFAULT_KITS[0];

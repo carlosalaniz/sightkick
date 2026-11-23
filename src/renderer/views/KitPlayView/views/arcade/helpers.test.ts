@@ -12,7 +12,6 @@ import {
   beatSecondsAt,
   buildSections,
   forEachBeat,
-  keyLabel,
   laneOwner,
   lanePieces,
   maxNotesInWindow,
@@ -166,15 +165,7 @@ describe('time lookups', () => {
   });
 });
 
-describe('keyLabel', () => {
-  it('shortens key codes', () => {
-    expect(keyLabel('KeyJ')).toBe('J');
-    expect(keyLabel('Digit4')).toBe('4');
-    expect(keyLabel('Space')).toBe('Space');
-    expect(keyLabel('Semicolon')).toBe(';');
-    expect(keyLabel('F5')).toBe('F5');
-  });
-
+describe('padKeyLabel', () => {
   it('labels a pad by its keyboard control only', () => {
     const kit = {
       ...DEFAULT_KITS[0],

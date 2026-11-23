@@ -6,6 +6,7 @@ import {
   controlsForPiece,
   Kit,
   KitPiece,
+  keyName,
   lastIndexAtOrBefore,
   TimelineBar,
   TimelineNote,
@@ -117,39 +118,6 @@ export function beatSecondsAt(bars: TimelineBar[], time: number): number {
   return (bar.end - bar.start) / bar.beats.length;
 }
 
-/** `KeyJ` → `J`, `Digit4` → `4`, `Semicolon` → `;`. */
-export function keyLabel(code: string): string {
-  const named: Record<string, string> = {
-    Space: 'Space',
-    Semicolon: ';',
-    Quote: "'",
-    Comma: ',',
-    Period: '.',
-    Slash: '/',
-    Backslash: '\\',
-    BracketLeft: '[',
-    BracketRight: ']',
-    Minus: '-',
-    Equal: '=',
-    Backquote: '`',
-    Enter: 'Enter',
-    ShiftLeft: 'Shift',
-    ShiftRight: 'Shift',
-    ArrowLeft: '←',
-    ArrowRight: '→',
-    ArrowUp: '↑',
-    ArrowDown: '↓',
-  };
-
-  if (named[code]) {
-    return named[code];
-  }
-
-  const m = /^(?:Key|Digit|Numpad)(.+)$/.exec(code);
-
-  return m ? m[1] : code;
-}
-
 /** The keyboard key that plays a piece, for its pad label; '' if none. */
 export function padKeyLabel(
   kit: Kit,
@@ -160,7 +128,7 @@ export function padKeyLabel(
     (c) => controlSource(c) === 'keyboard',
   );
 
-  return key ? keyLabel(controlLabel(key)) : '';
+  return key ? keyName(controlLabel(key)) : '';
 }
 
 /**

@@ -1,50 +1,12 @@
 import { InputMapping } from '../../../types';
 import { controlLabel, controlSource } from '../../input';
-import { Kit, KitPiece, MIDI_ZONES, Voice } from '../../kit';
+import { Kit, KitPiece, keyName, MIDI_ZONES, Voice } from '../../kit';
 import { byX } from './kitEdits';
 
 /** Delay before "Learn unmapped pads" moves on after a learned hit. */
 export const ADVANCE_DELAY_MS = 650;
 
 export const MONITOR_LENGTH = 7;
-
-const KEY_NAMES: Record<string, string> = {
-  ArrowLeft: '←',
-  ArrowRight: '→',
-  ArrowUp: '↑',
-  ArrowDown: '↓',
-  Space: 'Space',
-  Enter: 'Enter',
-  Backspace: '⌫',
-  Semicolon: ';',
-  Quote: "'",
-  Comma: ',',
-  Period: '.',
-  Slash: '/',
-  Backslash: '\\',
-  BracketLeft: '[',
-  BracketRight: ']',
-  Minus: '-',
-  Equal: '=',
-  Backquote: '`',
-};
-
-/** A readable name for a `KeyboardEvent.code` ("KeyJ" → "J"). */
-export function keyName(code: string): string {
-  if (/^Key[A-Z]$/.test(code)) {
-    return code.slice(3);
-  }
-
-  if (/^Digit\d$/.test(code)) {
-    return code.slice(5);
-  }
-
-  if (code.startsWith('Numpad')) {
-    return `Num ${code.slice(6)}`;
-  }
-
-  return KEY_NAMES[code] ?? code;
-}
 
 function midiNote(controlId: string): number | undefined {
   if (controlSource(controlId) !== 'midi') {
