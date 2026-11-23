@@ -12,11 +12,13 @@ export function kitInputMapping(
   fallback: InputMapping,
 ): InputMapping {
   const out: InputMapping = {};
+  // Kits stored by older builds have no `controls`; treat that as none learned.
+  const controls: Kit['controls'] = kit.controls ?? {};
 
   for (const { id } of VOICES) {
     const learned = kit.pieces
       .filter((p) => p.voices.includes(id))
-      .flatMap((p) => kit.controls[p.id] ?? []);
+      .flatMap((p) => controls[p.id] ?? []);
 
     out[id] = learned.length > 0 ? [...new Set(learned)] : fallback[id] ?? [];
   }

@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { assertNever } from '../../../../../shared/assertNever';
 import { cn } from '../../../../cn';
+import { SheetLanesProgress } from '../../storedSettings';
 import { Stars } from '../../../../components/Stars';
 import { limitPercent, SHEET_LANES_ROUGH_ACCURACY } from '../shared/judging';
 import { CoachReport, coachStatus, coachTip } from './coach';
@@ -63,24 +64,6 @@ function reportVerdict(report: PassReport): { text: string; good: boolean } {
     default:
       return assertNever(report, 'pass report');
   }
-}
-
-export interface ProbeEntry {
-  at: number;
-  start: number;
-  end: number;
-  accuracy: number;
-  sdMs: number;
-  tempo: number;
-}
-
-export interface SongProgress {
-  /** Best practice pass at 100% tempo, 0–1. */
-  best100?: number;
-  /** Furthest bar (exclusive) played through. */
-  seenTo?: number;
-  /** Newest first. */
-  probes: ProbeEntry[];
 }
 
 export function Panel({
@@ -374,7 +357,7 @@ export function TempoLadder({
 export function ReadingProgress({
   progress,
 }: {
-  progress: SongProgress | undefined;
+  progress: SheetLanesProgress | undefined;
 }) {
   const best =
     progress?.best100 === undefined

@@ -18,6 +18,11 @@ import {
 } from '../hooks';
 import { PlaySession } from '../session';
 import {
+  parseGemsAheadMs,
+  parseSheetLanesProgressMap,
+  SheetLanesProgress,
+} from '../storedSettings';
+import {
   coachBand,
   CoachReport,
   coachReport,
@@ -58,7 +63,6 @@ import {
   PassReport,
   PassReportStats,
   ReadingProgress,
-  SongProgress,
   SummaryPanel,
   TempoLadder,
 } from './sheetLanes/Panels';
@@ -121,7 +125,8 @@ const MOTIONS: { value: Motion; label: string }[] = [
   { value: 'scroll', label: 'Scroll' },
   { value: 'page', label: 'Page' },
 ];
-const EMPTY_PROGRESS: SongProgress = { probes: [] };
+const EMPTY_PROGRESS: SheetLanesProgress = { probes: [] };
+const DEFAULT_GEMS_AHEAD_MS = 1200;
 /** Unseen-bars passes kept in Reading progress, newest first. */
 const MAX_LOGGED_PROBES = 8;
 /** Audio time going back more than this is a jump (wrap or seek), not jitter. */
@@ -176,12 +181,19 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
   const motion: Motion = motionSetting === 'page' ? 'page' : 'scroll';
   const [lookSetting, setLook] = usePersisted('settings.v6.lookAhead', 2);
   const look = LOOK_AHEAD_OPTIONS.includes(lookSetting) ? lookSetting : 2;
-  const [gemsMs, setGemsMs] = usePersisted('settings.v6.gemsMs', 1200);
+  const [gemsSetting, setGemsMs] = usePersisted(
+    'settings.v6.gemsMs',
+    DEFAULT_GEMS_AHEAD_MS,
+  );
+  const gemsMs = parseGemsAheadMs(gemsSetting) ?? DEFAULT_GEMS_AHEAD_MS;
   const [allProgress, setAllProgress] = usePersisted<
-    Record<string, SongProgress>
+    Record<string, SheetLanesProgress>
   >('settings.v6.progress', {});
   const songId = session.song.id;
-  const progress = allProgress[songId] ?? EMPTY_PROGRESS;
+  // Stored progress is parsed on every read and write: an older or broken
+  // entry (no `probes`) would otherwise throw here and in the updaters.
+  const progress =
+    parseSheetLanesProgressMap(allProgress)?.[songId] ?? EMPTY_PROGRESS;
   const [range, setRange] = useState<BarRange>(() => defaultRange(bars, notes));
   const model = useMemo(
     () => buildLoopModel(bars, notes, range),
@@ -508,7 +520,8 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
       r.levels = r.levels.map(() => level);
     }
 
-    setAllProgress((all) => {
+    setAllProgress((stored) => {
+      const all = parseSheetLanesProgressMap(stored) ?? {};
       const prev = all[songId] ?? EMPTY_PROGRESS;
 
       return {
@@ -558,7 +571,8 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
 
     setCoach(coachReport(r.logs.entries(), coachBand(sixteenthMs)));
     setSpacing(laneSpacing(r.levels));
-    setAllProgress((all) => {
+    setAllProgress((stored) => {
+      const all = parseSheetLanesProgressMap(stored) ?? {};
       const prev = all[songId] ?? EMPTY_PROGRESS;
       const best100 =
         Math.abs(tempo - 1) < 1e-6

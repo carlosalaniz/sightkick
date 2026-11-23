@@ -14,6 +14,8 @@ export * from './keyName';
 
 export * from './reducedMotion';
 
+export * from './storedKits';
+
 export * from './KitSvg';
 
 export { KitProvider, useKit } from './KitContext';

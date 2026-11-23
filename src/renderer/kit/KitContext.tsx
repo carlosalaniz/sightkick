@@ -8,12 +8,8 @@ import {
 import { usePersisted } from '../hooks/usePersisted';
 import { DEFAULT_KITS } from './constants';
 import { KitDefs } from './KitSvg';
+import { KitState } from './storedKits';
 import { Kit } from './types';
-
-interface KitState {
-  kits: Kit[];
-  currentId: string;
-}
 
 interface KitContextValue {
   kits: Kit[];
