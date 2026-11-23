@@ -6,6 +6,7 @@ services:
       - "127.0.0.1:8765:8765"
     volumes:
       - models:/models
+      - cache:/cache
     environment:
       # Any models audio-separator supports. "fast" is what the desktop app
       # uses; "best" is slower with cleaner drums. The app picks per split.
@@ -18,3 +19,6 @@ volumes:
   models:
     # Shared by both compose files so models download only once.
     name: sightkick-models
+  cache:
+    # Finished splits, shared by both compose files.
+    name: sightkick-stem-cache

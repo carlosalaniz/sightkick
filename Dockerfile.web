@@ -14,8 +14,17 @@ RUN yarn install --immutable --mode=skip-build
 COPY tsconfig.json vite.web.config.ts ./
 COPY assets assets
 COPY src src
+# Default stem server address baked into the app. "/stem-api" is proxied by
+# this image's nginx when SK_STEM_UPSTREAM is set at run time; users can still
+# point the app elsewhere in its settings.
+ARG SK_STEM_SERVER_URL=/stem-api
+ENV SK_STEM_SERVER_URL=${SK_STEM_SERVER_URL}
 RUN yarn build:web
 
 FROM nginx:1.27-alpine
 COPY --from=build /app/out/web /usr/share/nginx/html
+COPY docker/web/default.conf /etc/nginx/conf.d/default.conf
+COPY docker/web/40-sightkick-stem-proxy.sh /docker-entrypoint.d/
+# Proxy target for /stem-api/, e.g. http://stem-server:8765. Unset: no proxy.
+ENV SK_STEM_UPSTREAM=""
 EXPOSE 80

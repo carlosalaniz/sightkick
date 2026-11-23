@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button, Input } from 'antd';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowsRotate } from '@fortawesome/free-solid-svg-icons';
+import { DEFAULT_STEM_SERVER_URL } from '../../../stemServerUrl';
 import { usePersisted } from '../../hooks/usePersisted';
 import { useStemToolsContext } from '../../context/StemToolsContext';
 import { SettingLabel } from '../SettingsButton/SettingLabel';
@@ -10,7 +11,7 @@ import { Tooltip } from '../Tooltip';
 // Must match src/web/stem-server.ts.
 const URL_KEY = 'settings.stemServerUrl';
 const QUALITY_KEY = 'settings.stemQuality';
-const DEFAULT_URL = 'http://localhost:8765';
+const DEFAULT_URL = DEFAULT_STEM_SERVER_URL;
 
 /** Browser build only: where the optional stem-splitting server runs. */
 export function StemServerSettings() {

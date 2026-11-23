@@ -75,6 +75,14 @@ Differences from the desktop app:
 
 `.github/workflows/web.yml` builds the web version and deploys it to GitHub Pages.
 
+### Run it on Harbor
+
+The repository is a [Harbor](https://github.com/carlosalaniz/harbor) app: add `https://github.com/carlosalaniz/sightkick` under **App Store → + Your own app → Git repository** (or `harbor sources add https://github.com/carlosalaniz/sightkick`). Harbor reads [harbor/](harbor/), builds the web app and the stem server on the machine, and with *redeploy on commit* on, every push to the branch becomes an update.
+
+Only the web app gets an address: its nginx serves the site and forwards `/stem-api/` to the stem server, which the app uses by default. Every finished split is kept in the app's *split cache* storage, so a song is only ever split once (see [stem-server/README.md](stem-server/README.md#cache)). Open it over HTTPS (Harbor's secure LAN address, Tailscale or a domain): the song library and Web MIDI need a secure page. Splitting has no login of its own, so turn on Harbor's app login before publishing it on the internet.
+
+Check the package with Harbor's validator from a Harbor checkout: `harbor packages validate ../sightkick`.
+
 ## Acknowledgements
 
 * [Enchor](https://www.enchor.us/) for the song library

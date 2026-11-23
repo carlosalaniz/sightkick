@@ -12,6 +12,10 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   define: {
     __SK_WEB__: 'true',
+    // Default stem server address; the Docker image sets /stem-api.
+    __SK_STEM_SERVER_URL__: JSON.stringify(
+      process.env.SK_STEM_SERVER_URL ?? '',
+    ),
   },
   build: {
     outDir: path.resolve(__dirname, 'out/web'),

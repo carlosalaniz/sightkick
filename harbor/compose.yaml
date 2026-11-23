@@ -1,0 +1,29 @@
+services:
+  web:
+    # The browser build, served by nginx. It forwards /stem-api/ to the stem server,
+    # which the app uses by default (Dockerfile.web bakes in /stem-api).
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+    environment:
+      SK_STEM_UPSTREAM: "http://stem-server:8765"
+    depends_on:
+      stem-server: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  stem-server:
+    # Splits songs into stems (and drums into kit pieces) on the CPU. Never published:
+    # only the web service reaches it. Its image carries its own health check.
+    build:
+      context: ../stem-server
+    volumes:
+      - {type: volume, source: models, target: /models}
+      - {type: volume, source: cache, target: /cache}
+    # A split pegs every core for minutes; give way to other apps when they need the CPU.
+    cpu_shares: 512
+volumes:
+  models: {}
+  cache: {}

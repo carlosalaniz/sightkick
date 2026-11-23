@@ -9,6 +9,13 @@ services:
     image: sightkick-web
     ports:
       - "127.0.0.1:${SK_WEB_PORT:-4280}:80"
+    environment:
+      # The app calls /stem-api/ on its own origin; nginx forwards it here.
+      SK_STEM_UPSTREAM: http://stem-server:8765
+    depends_on:
+      stem-server:
+        condition: service_started
+        restart: true
     restart: unless-stopped
 
   stem-server:
@@ -20,3 +27,5 @@ volumes:
   models:
     # Shared by both compose files so models download only once.
     name: sightkick-models
+  cache:
+    name: sightkick-stem-cache

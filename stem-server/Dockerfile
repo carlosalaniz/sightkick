@@ -28,13 +28,16 @@ RUN apt-get update \
 COPY --from=build /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    SK_MODEL_DIR=/models
+    SK_MODEL_DIR=/models \
+    SK_CACHE_DIR=/cache
 
 WORKDIR /app
 COPY app.py .
 
 # The ~700 MB model is downloaded here on first start; mount a volume to keep it.
 VOLUME /models
+# Finished splits, kept forever; mount a volume so they survive the container.
+VOLUME /cache
 EXPOSE 8765
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
