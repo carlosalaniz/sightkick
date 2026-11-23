@@ -58,7 +58,17 @@ MODES = ("stems", "kit", "stems+kit")
 DEFAULT_QUALITY = os.environ.get("SK_DEFAULT_QUALITY", "fast")
 MODEL_DIR = os.environ.get("SK_MODEL_DIR", "/models")
 WORK_DIR = Path(os.environ.get("SK_WORK_DIR", Path(tempfile.gettempdir()) / "sightkick-stems"))
+# Limit on the audio in one request: the files' bytes, all together.
 MAX_UPLOAD_MB = int(os.environ.get("SK_MAX_UPLOAD_MB", "200"))
+# Room for the multipart headers and form fields around the files, so a
+# request is turned away on its Content-Length only when the audio inside it
+# must be over MAX_UPLOAD_MB.
+MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+# A Clone Hero song has at most about a dozen audio files.
+MAX_FILES = int(os.environ.get("SK_MAX_FILES", "16"))
+# New jobs waiting to run before POST /jobs answers 429. Cache hits and
+# requests that join a job already in the queue are always accepted.
+MAX_QUEUED = int(os.environ.get("SK_MAX_QUEUED", "20"))
 JOB_TTL_SECONDS = int(os.environ.get("SK_JOB_TTL_SECONDS", "3600"))
 # Longest a job may run, including a first-use model download (Best is about
 # 700 MB) and a stems+kit pass on the CPU. Past it the job stops at the model's
@@ -705,6 +715,20 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="SightKick stem server", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def reject_oversized_uploads(request: Request, call_next):
+    # Runs before FastAPI parses (and spools to disk) the multipart body. The
+    # byte count in create_job still applies to requests without a
+    # Content-Length. Registered before CORS, so CORS wraps this response too.
+    length = request.headers.get("content-length", "")
+    limit = MAX_UPLOAD_MB * 1024 * 1024 + MULTIPART_OVERHEAD_BYTES
+    if request.method == "POST" and length.isdigit() and int(length) > limit:
+        return JSONResponse({"detail": f"Upload is over {MAX_UPLOAD_MB} MB", "code": "too_large"}, 413)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -769,6 +793,8 @@ async def create_job(
             raise HTTPException(503, f"{MODELS[key]} failed to load; see the server log")
     if not files:
         raise HTTPException(400, "Send at least one audio file")
+    if len(files) > MAX_FILES:
+        raise HTTPException(400, f"Send at most {MAX_FILES} audio files")
 
     job_id = uuid.uuid4().hex
     job_dir = WORK_DIR / job_id
@@ -796,6 +822,7 @@ async def create_job(
 
     key = cache_key(hashes, mode, quality) if CACHE_ENABLED else None
     job = Job(id=job_id, dir=job_dir, inputs=inputs, quality=quality, mode=mode, cache_key=key)
+    busy = False
     with lock:
         cached = cache_lookup(key) if key else None
         if not cached:
@@ -805,9 +832,14 @@ async def create_job(
                 joined.watchers += 1
                 log.info("Job request joined running job %s (%d clients)", joined.id, joined.watchers)
                 return joined.to_json(queue_position(joined))
-            jobs[job_id] = job
-            if key:
-                inflight[key] = job_id
+            busy = sum(1 for j in jobs.values() if j.status == "queued") >= MAX_QUEUED
+            if not busy:
+                jobs[job_id] = job
+                if key:
+                    inflight[key] = job_id
+    if busy:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise HTTPException(429, f"{MAX_QUEUED} splits are already waiting; try again later")
     if not cached:
         pending.put(job_id)
         return job.to_json(queue_position(job))

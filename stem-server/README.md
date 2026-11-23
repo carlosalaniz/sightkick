@@ -68,7 +68,9 @@ Bump `CACHE_VERSION` in `app.py` when a code change alters what a model produces
 | `SK_KIT_MODEL` | `MDX23C-DrumSep-aufr33-jarredou.ckpt` | Model that splits drums into kit pieces |
 | `SK_DEFAULT_QUALITY` | `fast` | Preset used when a request doesn't name one; it's also loaded at startup |
 | `SK_MODEL_DIR` | `/models` | Where models are downloaded |
-| `SK_MAX_UPLOAD_MB` | `200` | Upload size limit |
+| `SK_MAX_UPLOAD_MB` | `200` | Limit on the audio in one request, all files together. A request whose `Content-Length` is over it (plus 1 MB for the form around the files) is refused before it's read |
+| `SK_MAX_FILES` | `16` | Most audio files one request may send |
+| `SK_MAX_QUEUED` | `20` | New jobs that may wait to run; past it `POST /jobs` answers 429. Cache hits and requests joining a queued job still go through |
 | `SK_OGG_QUALITY` | `6` | Vorbis quality (0–10) of the returned stems |
 | `SK_JOB_TTL_SECONDS` | `3600` | How long a finished job stays reachable by id (its stems stay in the cache) |
 | `SK_JOB_TIMEOUT_SECONDS` | `3600` | Longest a split may run, including a first-use model download; then it ends with `timed_out` |
@@ -111,9 +113,10 @@ Every HTTP error response is `{ "detail": "<message>", "code": "<code>" }`:
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `bad_request` | Unknown `quality` or `mode`, no files, or a malformed form |
+| 400 | `bad_request` | Unknown `quality` or `mode`, no files, more than `SK_MAX_FILES` files, or a malformed form |
 | 404 | `not_found` | Unknown or expired job, or a stem the job doesn't have |
 | 413 | `too_large` | The upload is over `SK_MAX_UPLOAD_MB` |
+| 429 | `busy` | `SK_MAX_QUEUED` jobs are already waiting; try again later |
 | 503 | `model_unavailable` | The model a request needs has failed to load |
 
 ## Tests

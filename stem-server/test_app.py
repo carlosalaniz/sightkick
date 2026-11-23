@@ -496,3 +496,49 @@ def test_an_ffmpeg_run_over_its_timeout_reports_timed_out(client, lib, monkeypat
     job = wait_done(client, post(client, wav_bytes(2000))["id"])
     assert job["status"] == "error"
     assert job["errorCode"] == "timed_out"
+
+
+def test_an_upload_over_the_limit_by_content_length_is_refused_before_parsing(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "MAX_UPLOAD_MB", 1)
+    # Not valid multipart: parsing it would give a 400, so a 413 means the
+    # request was turned away on its Content-Length alone.
+    res = client.post(
+        "/jobs", content=b"x" * (3 * 1024 * 1024), headers={"content-type": "multipart/form-data; boundary=zz"}
+    )
+    assert res.status_code == 413
+    assert res.json() == {"detail": "Upload is over 1 MB", "code": "too_large"}
+
+
+def test_files_over_the_limit_within_the_multipart_slack_are_still_refused(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "MAX_UPLOAD_MB", 1)
+    big = b"\0" * (1024 * 1024 + 4096)
+    res = client.post("/jobs", files=[("files", ("song.wav", big, "audio/wav"))], data={"quality": "fast"})
+    assert res.status_code == 413
+    assert res.json()["code"] == "too_large"
+    assert list(app.WORK_DIR.iterdir()) == []
+
+
+def test_too_many_files_in_one_request_get_400(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "MAX_FILES", 2)
+    files = [("files", (f"{i}.wav", wav_bytes(2100 + i), "audio/wav")) for i in range(3)]
+    res = client.post("/jobs", files=files, data={"quality": "fast"})
+    assert res.status_code == 400
+    assert res.json()["code"] == "bad_request"
+
+
+def test_a_full_queue_refuses_new_jobs_with_429_but_still_lets_requests_join(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "MAX_QUEUED", 1)
+    lib.gate = threading.Event()
+    running = post(client, wav_bytes(2200))
+    wait_for(lib.chunks_started.is_set, "the first job to start")
+    queued = post(client, wav_bytes(2201))
+    assert queued["status"] == "queued"
+
+    res = client.post("/jobs", files=[("files", ("s.wav", wav_bytes(2202), "audio/wav"))], data={"quality": "fast"})
+    assert res.status_code == 429
+    assert res.json()["code"] == "busy"
+    assert post(client, wav_bytes(2201))["id"] == queued["id"]
+
+    lib.gate.set()
+    assert wait_done(client, running["id"])["status"] == "done"
+    assert wait_done(client, queued["id"])["status"] == "done"
