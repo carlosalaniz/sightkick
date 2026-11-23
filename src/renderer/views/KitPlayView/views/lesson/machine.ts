@@ -1,16 +1,22 @@
 import { assertNever } from '../../../../../shared/assertNever';
+import {
+  LESSON_CLEAN_ACCURACY,
+  LESSON_ROUGH_ACCURACY,
+  LESSON_TIER_MS,
+  LESSON_TIER_WEIGHT,
+} from '../shared/judging';
 import { isListening, LessonStep } from './steps';
 
-/** Accuracy a pass needs to count as clean (the mock's 85% target). */
-export const TARGET = 0.85;
+/** Accuracy a pass needs to count as clean. */
+export const TARGET = LESSON_CLEAN_ACCURACY;
 
 /** Below this a pass is rough; two in a row and the lesson eases off. */
-export const ROUGH = 0.6;
+export const ROUGH = LESSON_ROUGH_ACCURACY;
 
-/** Timing tiers in ms: on time, close, else off. Weights follow the mock. */
-export const TIER_MS = [35, 70] as const;
+/** Timing tiers in ms: on time, close, else off. */
+export const TIER_MS = LESSON_TIER_MS;
 
-export const TIER_WEIGHT = [1, 0.7, 0.4] as const;
+export const TIER_WEIGHT = LESSON_TIER_WEIGHT;
 
 export const MIN_SPEED = 0.6;
 

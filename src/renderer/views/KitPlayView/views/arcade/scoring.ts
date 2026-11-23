@@ -1,3 +1,4 @@
+import { ARCADE_STAR_ACCURACY, starsFromAccuracy } from '../shared/judging';
 import { Voice } from '../../../../kit';
 
 /** One grade of a hit, by how far it landed from the note. */
@@ -333,24 +334,9 @@ export function summarize(
   };
 }
 
+/** Stars (0–5) on the results card. */
 export function starsFor(accuracy: number): number {
-  if (accuracy >= 0.95) {
-    return 5;
-  }
-
-  if (accuracy >= 0.9) {
-    return 4;
-  }
-
-  if (accuracy >= 0.8) {
-    return 3;
-  }
-
-  if (accuracy >= 0.65) {
-    return 2;
-  }
-
-  return accuracy >= 0.5 ? 1 : 0;
+  return starsFromAccuracy(accuracy, ARCADE_STAR_ACCURACY);
 }
 
 /** `+12 ms`, `−8 ms` (true minus sign), `0 ms`. */

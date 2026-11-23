@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { cn } from '../../../../cn';
 import { Stars } from '../../../../components/Stars';
+import { limitPercent, SHEET_LANES_ROUGH_ACCURACY } from '../shared/judging';
 import { CoachReport, coachStatus, coachTip } from './coach';
 import { GuideMode } from './guide';
 import { BarRange, rangeLabel } from './region';
@@ -329,8 +330,9 @@ export function TempoLadder({
         })}
       </div>
       <p className={NOTE}>
-        Two clean passes move up; two clearly rough passes (under 60%) move
-        down; anything else stays. Dashed rungs are over-speed.
+        Two clean passes move up; two clearly rough passes (under{' '}
+        {limitPercent(SHEET_LANES_ROUGH_ACCURACY)}) move down; anything else
+        stays. Dashed rungs are over-speed.
       </p>
     </div>
   );

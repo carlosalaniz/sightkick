@@ -2,8 +2,16 @@
  * Pass scoring for the sheet-lanes view: timing tiers inside the user's hit
  * window, the per-pass summary, the tempo ladder and the streak multiplier.
  * All times are real (wall-clock) milliseconds, i.e. already divided by the
- * playback speed.
+ * playback speed. Pass and star limits are in `../shared/judging`.
  */
+
+import {
+  SHEET_LANES_CLEAN_ACCURACY,
+  SHEET_LANES_CLEAN_MAX_MISSES,
+  SHEET_LANES_ROUGH_ACCURACY,
+  SHEET_LANES_STAR_ACCURACY,
+  starsFromAccuracy,
+} from '../shared/judging';
 
 export type TierId = 'perfect' | 'great' | 'good' | 'ok';
 
@@ -100,7 +108,8 @@ export interface PassStats {
   meanMs: number;
   /** Spread (SD) of the hit offsets. */
   sdMs: number;
-  stars: 0 | 1 | 2 | 3;
+  /** 0–3, from `SHEET_LANES_STAR_ACCURACY`. */
+  stars: number;
 }
 
 export function evaluatePass(results: NoteResult[]): PassStats {
@@ -124,15 +133,6 @@ export function evaluatePass(results: NoteResult[]): PassStats {
   }
 
   const accuracy = results.length > 0 ? credit / results.length : 0;
-  let stars: PassStats['stars'] = 0;
-
-  if (accuracy >= 0.95) {
-    stars = 3;
-  } else if (accuracy >= 0.85) {
-    stars = 2;
-  } else if (accuracy >= 0.7) {
-    stars = 1;
-  }
 
   return {
     total: results.length,
@@ -141,21 +141,24 @@ export function evaluatePass(results: NoteResult[]): PassStats {
     counts,
     meanMs: mean(offsets),
     sdMs: sd(offsets),
-    stars,
+    stars: starsFromAccuracy(accuracy, SHEET_LANES_STAR_ACCURACY),
   };
 }
 
 export type PassOutcome = 'clean' | 'fail' | 'close';
 
-/** Clean: at most one miss and 85%+. Clear fail: under 60%. */
+/** Clean: few enough misses and accurate enough. Clear fail: under the rough limit. */
 export function passOutcome(
   stats: Pick<PassStats, 'accuracy' | 'misses'>,
 ): PassOutcome {
-  if (stats.misses <= 1 && stats.accuracy >= 0.85) {
+  if (
+    stats.misses <= SHEET_LANES_CLEAN_MAX_MISSES &&
+    stats.accuracy >= SHEET_LANES_CLEAN_ACCURACY
+  ) {
     return 'clean';
   }
 
-  return stats.accuracy < 0.6 ? 'fail' : 'close';
+  return stats.accuracy < SHEET_LANES_ROUGH_ACCURACY ? 'fail' : 'close';
 }
 
 /** Tempo ladder rungs as playback speeds; the last two are over-speed. */

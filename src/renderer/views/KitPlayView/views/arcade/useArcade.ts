@@ -12,6 +12,7 @@ import {
   skippedLine,
   skippedVoices,
 } from './helpers';
+import { ARCADE_LOOP_PASS_ACCURACY } from '../shared/judging';
 import { JudgmentLog } from './log';
 import { ArcadeResults, buildResults } from './results';
 import {
@@ -192,7 +193,7 @@ export function useArcade(
             `${sections[loopIdx]?.name ?? 'Loop'} · ${formatPercent(
               s.accuracy,
             )} · ${s.misses} missed · avg ${formatOffset(s.avgMs)}`,
-            s.accuracy >= 0.85,
+            s.accuracy >= ARCADE_LOOP_PASS_ACCURACY,
           );
         }
 
