@@ -35,6 +35,9 @@ module.exports = [
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       'react/display-name': 'off',
+      // Grouped case labels (`case 'a': case 'b':`) read as one case: allow
+      // them, kept together (see the 'case' padding below).
+      'no-fallthrough': ['error', { allowEmptyCase: true }],
       curly: ['error', 'all'],
       'padding-line-between-statements': [
         'error',
@@ -46,6 +49,7 @@ module.exports = [
         },
         { blankLine: 'any', prev: 'expression', next: 'expression' },
         { blankLine: 'never', prev: 'import', next: 'import' },
+        { blankLine: 'any', prev: 'case', next: 'case' },
       ],
     },
     settings: {
