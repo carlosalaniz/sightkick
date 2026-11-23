@@ -18,13 +18,15 @@ import { Difficulty } from 'scan-chart';
 import { calculateAccuracy, getStarRating } from '../../scoring';
 import { DifficultyRing } from './DifficultyRing';
 import { OnlineSong } from '../../types';
+import { IS_WEB } from '../../platform';
+import { hasDrumAudio, splitInputs, SplitParts } from '../../../songData';
 
 export interface SongListItemProps {
   songData: Song | OnlineSong;
   onLikeChange: (id: string, liked: boolean) => void;
   onDownload: (id: string) => void;
   onClick: () => void;
-  onSplit: (id: string) => void;
+  onSplit: (id: string, parts?: SplitParts) => void;
   downloading?: boolean;
   difficulty: Difficulty;
   splitting: boolean;
@@ -76,9 +78,20 @@ export function SongListItem({
         <div className="flex flex-col gap-2 items-center h-full">
           <SongMenu
             dir={local.dir}
-            canSplit={(local.audio?.length ?? 0) === 1}
+            canSplit={
+              IS_WEB
+                ? splitInputs(local.audio ?? []).length > 0
+                : (local.audio?.length ?? 0) === 1
+            }
             splitting={splitting}
             onSplit={() => onSplit(id)}
+            canSplitKit={
+              IS_WEB &&
+              !local.drumKit?.length &&
+              (hasDrumAudio(local.audio ?? []) ||
+                splitInputs(local.audio ?? []).length > 0)
+            }
+            onSplitKit={() => onSplit(id, 'kit')}
           />
 
           <IconButton

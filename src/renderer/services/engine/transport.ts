@@ -45,6 +45,7 @@ export class Transport {
   private createPlayer: AudioPlayerFactory;
   private createdPlayer: AudioPlayer | undefined;
   private audioPlayer: AudioPlayer | undefined;
+  private held = false;
   private speedPlayer: SpeedControllableAudioPlayer | undefined;
   private state: PlaybackState = 'idle';
   private isStarted = false;
@@ -263,6 +264,9 @@ export class Transport {
       return;
     }
 
+    // Starting the player resumes its context, which ends any hold.
+    this.held = false;
+
     this.playGeneration += 1;
 
     const generation = this.playGeneration;
@@ -350,7 +354,40 @@ export class Transport {
     this.startAudio(startTime, this.songStartCtx);
   }
 
+  /**
+   * Freezes playback exactly where it is (audio, click and song time) without
+   * leaving the playing state, for wait mode. `release` carries on from the
+   * same spot with no count-in. Suspending the AudioContext stops its clock,
+   * which every player and the click are scheduled against.
+   */
+  hold(): void {
+    if (!this.audioPlayer || this.state !== 'playing' || this.held) {
+      return;
+    }
+
+    this.held = true;
+    void this.audioPlayer.context.suspend().catch(() => {});
+  }
+
+  release(): void {
+    if (!this.held) {
+      return;
+    }
+
+    this.held = false;
+
+    if (this.audioPlayer && this.state === 'playing') {
+      void this.audioPlayer.context.resume().catch(() => {});
+    }
+  }
+
+  get isHeld(): boolean {
+    return this.held;
+  }
+
   pause(): void {
+    this.held = false;
+
     if (!this.audioPlayer || this.state !== 'playing') {
       return;
     }
@@ -378,6 +415,8 @@ export class Transport {
     if (!this.audioPlayer) {
       return;
     }
+
+    this.held = false;
 
     this.playGeneration += 1;
 

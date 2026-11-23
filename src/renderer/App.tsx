@@ -3,6 +3,9 @@ import { App as AntdApp, ConfigProvider } from 'antd';
 import './App.css';
 import { SongListView } from './views/SongListView';
 import { SongView } from './views/SongView';
+import { KitLabView } from './views/KitLabView';
+import { KitPlayView } from './views/KitPlayView';
+import { KitProvider } from './kit';
 import { antdTheme } from './antdTheme';
 import { AppProvider } from './context/AppContext';
 import { InputProvider } from './context/InputContext';
@@ -27,13 +30,17 @@ export default function App() {
             <InputProvider>
               <SongViewSettingsProvider>
                 <NoteColorsProvider>
-                  <Router>
-                    <Routes>
-                      <Route path="/" element={<SongListView />}>
-                        <Route path=":id" element={<SongView />} />
-                      </Route>
-                    </Routes>
-                  </Router>
+                  <KitProvider>
+                    <Router>
+                      <Routes>
+                        <Route path="/kit" element={<KitLabView />} />
+                        <Route path="/" element={<SongListView />}>
+                          <Route path=":id" element={<SongView />} />
+                          <Route path=":id/play" element={<KitPlayView />} />
+                        </Route>
+                      </Routes>
+                    </Router>
+                  </KitProvider>
                 </NoteColorsProvider>
               </SongViewSettingsProvider>
             </InputProvider>

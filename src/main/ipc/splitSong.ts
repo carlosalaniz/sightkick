@@ -13,6 +13,7 @@ let processing = false;
 let activeProc: ReturnType<typeof spawn> | null = null;
 let activeId: string | null = null;
 let activeStemsDir: string | null = null;
+let activeProgress = 0;
 
 function removeActiveStems() {
   const stemsDir = activeStemsDir;
@@ -49,6 +50,21 @@ export function cancelSplit(_event: Electron.IpcMainEvent, id: string) {
   }
 }
 
+/**
+ * Re-announces the running and queued splits, so a reloaded window can show
+ * its processing queue again. Later progress keeps arriving on the original
+ * event, which targets the same window.
+ */
+export function resumeSplits(event: Electron.IpcMainEvent) {
+  if (activeId) {
+    event.reply('split-song', { id: activeId, progress: activeProgress });
+  }
+
+  for (const item of queue) {
+    event.reply('split-song', { id: item.id, progress: 0 });
+  }
+}
+
 async function doSplit(event: Electron.IpcMainEvent, id: string) {
   const songs = appState.store.get('songs') as StorageSchema['songs'];
   const songData = songs[id];
@@ -75,6 +91,7 @@ async function doSplit(event: Electron.IpcMainEvent, id: string) {
 
       activeProc = proc;
       activeId = id;
+      activeProgress = 0;
       activeStemsDir = path.join(songData.dir, 'stems');
 
       const stderr: string[] = [];
@@ -87,7 +104,8 @@ async function doSplit(event: Electron.IpcMainEvent, id: string) {
         const match = text.match(/(\d+)%\|/);
 
         if (match) {
-          event.reply('split-song', { id, progress: parseInt(match[1]) });
+          activeProgress = parseInt(match[1]);
+          event.reply('split-song', { id, progress: activeProgress });
         }
       });
       proc.on('error', (err) => {

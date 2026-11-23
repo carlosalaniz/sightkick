@@ -1,0 +1,25 @@
+/* Ring around the piece being learned. */
+@keyframes kit-listen-pulse {
+  from {
+    transform: scale(0.92);
+    opacity: 1;
+  }
+
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.kit-listen-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kit-listen-pulse 1s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kit-listen-ring {
+    animation: none;
+    opacity: 1;
+  }
+}

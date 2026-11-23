@@ -16,6 +16,7 @@ export type Channels =
   | 'delete-stem-tools'
   | 'split-song'
   | 'cancel-split'
+  | 'resume-splits'
   | 'open-song-directory'
   | 'midi-device-list'
   | 'listen-midi'

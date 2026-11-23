@@ -91,12 +91,13 @@ describe('web bridge', () => {
   });
 
   it('sends splits and cancels to the stem server', () => {
-    ipc.sendMessage('split-song', 'song-1');
+    ipc.sendMessage('split-song', 'song-1', 'kit');
     ipc.sendMessage('cancel-split', 'song-1');
 
     expect(stemServer.splitSong).toHaveBeenCalledWith(
       expect.any(Function),
       'song-1',
+      'kit',
     );
     expect(stemServer.cancelSplit).toHaveBeenCalledWith('song-1');
   });

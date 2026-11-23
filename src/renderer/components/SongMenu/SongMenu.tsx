@@ -10,18 +10,28 @@ import { IS_WEB } from '../../platform';
 interface Props {
   dir: string;
   canSplit: boolean;
+  canSplitKit?: boolean;
   splitting: boolean;
   onSplit: () => void;
+  onSplitKit?: () => void;
 }
 
-export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
+export function SongMenu({
+  dir,
+  canSplit,
+  canSplitKit = false,
+  splitting,
+  onSplit,
+  onSplitKit,
+}: Props) {
   const { stemToolsStatus } = useStemToolsContext();
   const [isOpen, setIsOpen] = useState(false);
   const showSplit = stemToolsStatus === 'ready' && canSplit;
+  const showSplitKit = stemToolsStatus === 'ready' && canSplitKit;
   const close = () => setIsOpen(false);
 
-  // The browser build can't open folders, so its only item is splitting.
-  if (IS_WEB && !showSplit) {
+  // The browser build can't open folders, so its only items are splits.
+  if (IS_WEB && !showSplit && !showSplitKit) {
     return null;
   }
 
@@ -39,6 +49,7 @@ export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
         <div onClick={(event) => event.stopPropagation()}>
           <SongMenuContent
             showSplit={showSplit}
+            showSplitKit={showSplitKit}
             splitting={splitting}
             onOpenDirectory={
               IS_WEB
@@ -53,6 +64,10 @@ export function SongMenu({ dir, canSplit, splitting, onSplit }: Props) {
             }
             onSplit={() => {
               onSplit();
+              close();
+            }}
+            onSplitKit={() => {
+              onSplitKit?.();
               close();
             }}
           />

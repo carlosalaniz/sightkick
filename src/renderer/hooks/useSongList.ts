@@ -8,6 +8,7 @@ import {
   isIpcError,
   Song,
 } from '../../types';
+import { SplitParts } from '../../songData';
 import { useApp } from '../context/AppContext';
 
 export function useSongList() {
@@ -96,6 +97,10 @@ export function useSongList() {
       ({ id, progress, success, song, error, cancelled }) => {
         if (progress !== undefined) {
           setSplitProgress((prev) => new Map(prev).set(id, progress));
+          // A split started before a reload reports in again: show it.
+          setSplittingIds((prev) =>
+            prev.has(id) ? prev : new Set(prev).add(id),
+          );
 
           return;
         }
@@ -137,12 +142,20 @@ export function useSongList() {
     );
   }, [notification]);
 
+  // Ask for splits still running from before a reload. Sent after the
+  // listener above is subscribed (effects run in order).
+  useEffect(() => {
+    window.electron.ipcRenderer.sendMessage('resume-splits');
+  }, []);
+
   const handleSplit = useCallback(
-    (id: string) => {
+    (id: string, parts: SplitParts = 'stems') => {
       setSplittingIds((prev) => new Set(prev).add(id));
-      window.electron.ipcRenderer.sendMessage('split-song', id);
+      window.electron.ipcRenderer.sendMessage('split-song', id, parts);
       notification.info({
-        title: `Splitting "${songList.find((s) => s.id === id)?.name}"`,
+        title: `Splitting ${
+          parts === 'kit' ? 'the drum kit of ' : ''
+        }"${songList.find((s) => s.id === id)?.name}"`,
         description: "You will be notified when it's done",
         placement: 'bottomRight',
       });

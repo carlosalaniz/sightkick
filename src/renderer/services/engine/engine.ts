@@ -13,6 +13,7 @@ import {
   EngineOptions,
   GameRendererRefs,
   EngineSettings,
+  JudgedHitHandler,
   JudgeSettings,
   LoopRegion,
   PlaybackSnapshot,
@@ -156,8 +157,36 @@ export class Engine {
     this.transport.cancel();
   }
 
+  /** Wait mode: freeze playback on the spot; `release` resumes it. */
+  hold(): void {
+    this.transport.hold();
+  }
+
+  release(): void {
+    this.transport.release();
+  }
+
+  get isHeld(): boolean {
+    return this.transport.isHeld;
+  }
+
   seekSeconds(seconds: number): void {
     this.transport.seekSeconds(seconds);
+  }
+
+  /** Scored hits with their timing offsets. */
+  onJudged(listener: JudgedHitHandler): () => void {
+    return this.judge.onJudged(listener);
+  }
+
+  /** Whether the note key prefix at this tick has been hit in the current pass. */
+  isHit(tick: number, prefix: string): boolean {
+    return this.judge.isHit(tick, prefix);
+  }
+
+  /** Half-width of the hit window, in seconds. */
+  get hitTolerance(): number {
+    return this.judge.tolerance;
   }
 
   setStemVolume(name: string, gain: number): void {

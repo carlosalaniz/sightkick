@@ -6,6 +6,7 @@ import {
   JudgeContext,
   JudgeGateHandler,
   JudgeHitHandler,
+  JudgedHitHandler,
   LoopRegion,
   NoteEntry,
   NotePos,
@@ -31,6 +32,7 @@ export class Judge {
   private hitTotal = 0;
   private falseHitTicks: number[] = [];
   private hitListeners = new Set<JudgeHitHandler>();
+  private judgedListeners = new Set<JudgedHitHandler>();
   private toleranceSeconds = HIT_TOLERANCE_SECONDS;
   // Miss gate: closes when a note comes due with none of its mapped parts hit,
   // reopens on the next correct hit. Drives "mute drums on miss".
@@ -142,6 +144,15 @@ export class Judge {
 
     return () => {
       this.hitListeners.delete(listener);
+    };
+  }
+
+  /** Like `onHit`, with the hit's timing offset and source control. */
+  onJudged(listener: JudgedHitHandler): () => void {
+    this.judgedListeners.add(listener);
+
+    return () => {
+      this.judgedListeners.delete(listener);
     };
   }
 
@@ -432,5 +443,21 @@ export class Judge {
     newPrefixes.forEach((p) => this.recordHit(hit.tick, p));
     this.setGate(true);
     this.hitListeners.forEach((listener) => listener(pos, newPrefixes));
+
+    if (this.judgedListeners.size > 0) {
+      const offsetSeconds =
+        currentTimeS - ticksToSeconds(hit.tick, chart.resolution, chart.tempos);
+
+      this.judgedListeners.forEach((listener) =>
+        listener({
+          pos,
+          tick: hit.tick,
+          prefixes: newPrefixes,
+          offsetSeconds,
+          controlId,
+          value,
+        }),
+      );
+    }
   }
 }

@@ -71,6 +71,44 @@ describe('Judge', () => {
     expect(onHit).toHaveBeenCalledWith({ measureIdx: 0, noteIdx: 0 }, ['c/5']);
   });
 
+  it('reports the timing offset of a hit to onJudged listeners', () => {
+    // 120 BPM at 480 ticks per beat: 48 ticks = 50 ms.
+    const { engine } = setup(
+      { measures: [measure([note(['c/5'], 480)])] },
+      { tick: 528 },
+    );
+    const onJudged = vi.fn();
+
+    engine.onJudged(onJudged);
+    engine.handleInput(hit('midi:38', 90));
+
+    expect(onJudged).toHaveBeenCalledTimes(1);
+
+    const [judged] = onJudged.mock.calls[0];
+
+    expect(judged).toMatchObject({
+      tick: 480,
+      prefixes: ['c/5'],
+      controlId: 'midi:38',
+      value: 90,
+      pos: { measureIdx: 0, noteIdx: 0 },
+    });
+    expect(judged.offsetSeconds).toBeCloseTo(0.05, 5);
+  });
+
+  it('reports an early hit as a negative offset', () => {
+    const { engine } = setup(
+      { measures: [measure([note(['c/5'], 480)])] },
+      { tick: 432 },
+    );
+    const onJudged = vi.fn();
+
+    engine.onJudged(onJudged);
+    engine.handleInput(hit('midi:38'));
+
+    expect(onJudged.mock.calls[0][0].offsetSeconds).toBeCloseTo(-0.05, 5);
+  });
+
   it('registers a hit using the remapped control after a remap', () => {
     const measures = [measure([note(['c/5'], 480)])];
     const { engine } = setup(

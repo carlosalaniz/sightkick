@@ -1,6 +1,12 @@
 import type { Channels, ElectronHandler } from '../preload/index';
 import * as handlers from './handlers';
-import { cancelSplit, checkStemServer, splitSong } from './stem-server';
+import { SplitParts } from '../songData';
+import {
+  cancelSplit,
+  checkStemServer,
+  resumeSplits,
+  splitSong,
+} from './stem-server';
 
 // Browser stand-in for the Electron preload bridge: the renderer keeps calling
 // window.electron.ipcRenderer, and messages are handled in-page instead of by
@@ -129,7 +135,12 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'split-song':
-      run(splitSong(reply, args[0] as string));
+      run(splitSong(reply, args[0] as string, args[1] as SplitParts));
+
+      break;
+
+    case 'resume-splits':
+      run(resumeSplits(reply));
 
       break;
 

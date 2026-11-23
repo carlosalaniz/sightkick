@@ -119,5 +119,14 @@ export const antdTheme: ThemeConfig = {
     Tabs: {
       colorBorderSecondary: themedark.color.surfaceRaised,
     },
+    Segmented: {
+      trackBg: themedark.color.surfaceSunken,
+      itemColor: themedark.color.textMuted,
+      itemHoverColor: themedark.color.text,
+      itemHoverBg: themedark.color.fill,
+      itemActiveBg: themedark.color.fillStrong,
+      itemSelectedBg: themedark.color.surfaceRaised,
+      itemSelectedColor: themedark.color.text,
+    },
   },
 };

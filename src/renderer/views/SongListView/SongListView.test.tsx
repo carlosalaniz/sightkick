@@ -251,7 +251,7 @@ describe('SongListView — stem splitting', () => {
 
     expect(view.ipc.sent).toContainEqual({
       channel: 'split-song',
-      args: ['a'],
+      args: ['a', 'stems'],
     });
     expect(screen.getByText('Processing queue')).toBeInTheDocument();
 

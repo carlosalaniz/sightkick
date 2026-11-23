@@ -4,6 +4,7 @@ import { Song } from '../../../types';
 import { cn } from '../../cn';
 import { SongListItem } from '../SongListItem';
 import { Difficulty } from 'scan-chart';
+import { SplitParts } from '../../../songData';
 import { OnlineSong } from '../../types';
 
 export interface SongListProps {
@@ -12,7 +13,7 @@ export interface SongListProps {
   onLikeChange: (id: string, liked: boolean) => void;
   onDownload: (id: string) => void;
   onClickSong: (id: string) => void;
-  onSplit: (id: string) => void;
+  onSplit: (id: string, parts?: SplitParts) => void;
   onLoadMore?: () => void;
   downloadingIds?: Set<string>;
   splittingIds: Set<string>;

@@ -22,9 +22,46 @@ export function toSong(stored: SongData): Song {
     drumDifficulty: Number.isNaN(rating) || rating < 0 ? 0 : rating,
     format: stored.format,
     audio: stored.audio,
+    ...(stored.drumKit?.length ? { drumKit: stored.drumKit } : {}),
     drumDifficulties: stored.drumDifficulties,
     liked: stored.liked,
     updatedAt: stored.updatedAt,
     scoreData: stored.scoreData,
   };
+}
+
+/** What a split produces: instrument stems, or those plus kit pieces. */
+export type SplitParts = 'stems' | 'kit';
+
+/** Folder inside a song that holds its drum-kit stems. */
+export const DRUM_KIT_DIR = 'drumkit';
+
+/** Kit stems the drum-kit split produces, in mixer order. */
+export const DRUM_KIT_PIECES = [
+  'kick',
+  'snare',
+  'toms',
+  'hihat',
+  'ride',
+  'crash',
+] as const;
+
+export type DrumKitPiece = (typeof DRUM_KIT_PIECES)[number];
+
+/** Drum audio of its own: drums, or drums_1..4 in multitrack charts. */
+export const isDrumAudio = (a: { name: string }) =>
+  /^drums(_\d+)?$/.test(a.name);
+
+export function hasDrumAudio(audio: { name: string }[]): boolean {
+  return audio.some(isDrumAudio);
+}
+
+// Audio a stem split should process: everything except crowd noise, which
+// stays as its own track. Only songs without a drum stem need splitting.
+export function splitInputs<T extends { name: string }>(audio: T[]): T[] {
+  if (hasDrumAudio(audio)) {
+    return [];
+  }
+
+  return audio.filter((a) => a.name !== 'crowd');
 }

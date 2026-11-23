@@ -55,6 +55,8 @@ export interface SongData {
   updatedAt?: string;
   format: 'mid' | 'chart';
   audio: AudioData[];
+  /** Drum stem split into kit pieces (kick, snare, ...), if it was split. */
+  drumKit?: AudioData[];
   drumDifficulties?: Difficulty[];
   scoreData?: Partial<Record<Difficulty, ScoreData>>;
 }
@@ -75,6 +77,7 @@ export interface Song {
   drumDifficulty: number;
   format: 'mid' | 'chart';
   audio: AudioData[];
+  drumKit?: AudioData[];
   drumDifficulties?: Difficulty[];
   liked?: boolean;
   updatedAt?: string;

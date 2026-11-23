@@ -4,6 +4,8 @@ export type {
   EngineContext,
   EngineOptions,
   EngineSettings,
+  JudgedHit,
+  JudgedHitHandler,
   LoopRegion,
   PlaybackSnapshot,
   PlaybackState,

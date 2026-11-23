@@ -3,7 +3,7 @@ import { Difficulty, parseChartFile } from 'scan-chart';
 import { AudioData, Song, SongData } from '../types';
 import { ALL_DIFFICULTIES } from '../constants';
 import { stripColorMarkup } from '../colorMarkup';
-import { toSong } from '../songData';
+import { DRUM_KIT_DIR, DRUM_KIT_PIECES, toSong } from '../songData';
 import { getFile, joinPath, LibraryRoot } from './library';
 
 export const SONG_ID_FILE = '.sightkick';
@@ -38,6 +38,16 @@ async function listDir(dir: FileSystemDirectoryHandle) {
 export interface SongDir {
   rel: string;
   files: FileMap;
+  /** Files in the song's drumkit/ folder, if it has one. */
+  kitFiles?: FileMap;
+}
+
+async function kitFilesOf(
+  dirs: FileSystemDirectoryHandle[],
+): Promise<FileMap | undefined> {
+  const kit = dirs.find((d) => d.name.toLowerCase() === DRUM_KIT_DIR);
+
+  return kit ? (await listDir(kit)).files : undefined;
 }
 
 /** Recursively finds every folder that holds a notes.mid or notes.chart. */
@@ -54,7 +64,7 @@ export async function findSongDirs(
     const { files, dirs } = await listDir(handle);
 
     if (files.has('notes.mid') || files.has('notes.chart')) {
-      found.push({ rel, files });
+      found.push({ rel, files, kitFiles: await kitFilesOf(dirs) });
     }
 
     for (const child of dirs) {
@@ -75,7 +85,9 @@ export async function listSongDir(
     dir = await dir.getDirectoryHandle(part);
   }
 
-  return { rel, files: (await listDir(dir)).files };
+  const { files, dirs } = await listDir(dir);
+
+  return { rel, files, kitFiles: await kitFilesOf(dirs) };
 }
 
 function readDrumDifficulties(
@@ -130,7 +142,7 @@ const baseOf = (name: string) => {
 
 /** Browser port of main/util.ts buildSongFromDir. */
 export async function buildSong(
-  { rel, files }: SongDir,
+  { rel, files, kitFiles }: SongDir,
   existing?: Partial<Existing>,
 ): Promise<SongData | null> {
   const iniHandle = files.get('song.ini');
@@ -170,6 +182,18 @@ export async function buildSong(
       src: toAssetRef(joinPath(rel, f.name)),
       name: baseOf(f.name),
     }));
+  const drumKit: AudioData[] = DRUM_KIT_PIECES.flatMap((piece) => {
+    const file = kitFiles?.get(`${piece}.ogg`);
+
+    return file
+      ? [
+          {
+            src: toAssetRef(joinPath(rel, DRUM_KIT_DIR, file.name)),
+            name: piece,
+          },
+        ]
+      : [];
+  });
 
   return {
     ...meta,
@@ -178,6 +202,7 @@ export async function buildSong(
     albumCover: cover ? toAssetRef(joinPath(rel, cover.name)) : null,
     format,
     audio,
+    ...(drumKit.length > 0 ? { drumKit } : {}),
     drumDifficulties,
     updatedAt: new Date(notesFile.lastModified).toISOString(),
     ...(existing?.liked !== undefined ? { liked: existing.liked } : {}),
@@ -234,16 +259,18 @@ export async function toUiSong(
 ): Promise<Song> {
   const song = toSong(stored);
   const albumCover = await resolveAsset(root, stored.albumCover);
-  const audio = withAudio
-    ? await Promise.all(
-        stored.audio.map(async (a) => ({
-          ...a,
-          src: (await resolveAsset(root, a.src)) ?? a.src,
-        })),
-      )
-    : song.audio;
+  const resolve = (list: AudioData[]) =>
+    Promise.all(
+      list.map(async (a) => ({
+        ...a,
+        src: (await resolveAsset(root, a.src)) ?? a.src,
+      })),
+    );
+  const audio = withAudio ? await resolve(stored.audio) : song.audio;
+  const drumKit =
+    withAudio && song.drumKit ? await resolve(song.drumKit) : song.drumKit;
 
-  return { ...song, albumCover, audio };
+  return { ...song, albumCover, audio, ...(drumKit ? { drumKit } : {}) };
 }
 
 /** Runs `fn` over `items` with at most `limit` promises in flight. */

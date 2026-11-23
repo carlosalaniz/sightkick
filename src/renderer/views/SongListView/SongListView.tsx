@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Spin } from 'antd';
+import { Button, Spin } from 'antd';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faDrum } from '@fortawesome/free-solid-svg-icons';
 import { Outlet, useNavigate, useOutlet } from 'react-router-dom';
 import { SongFilter } from '../../components/SongFilter';
 import { SongList } from '../../components/SongList';
@@ -123,7 +125,9 @@ export function SongListView() {
 
     const gameMode = await gameModeSelector.open();
 
-    if (gameMode) {
+    if (gameMode === 'kit') {
+      navigate(`/${id}/play`);
+    } else if (gameMode) {
       navigate(`/${id}?gameMode=${gameMode}`);
     }
   };
@@ -205,6 +209,14 @@ export function SongListView() {
               onOpenChange={setIsSortOpen}
               focusedIndex={isSortOpen ? focusedSortIndex : undefined}
             />
+            <Button
+              size="large"
+              data-testid="kit-lab-button"
+              icon={<FontAwesomeIcon icon={faDrum} />}
+              onClick={() => navigate('/kit')}
+            >
+              Kit
+            </Button>
             <SettingsButton page="song-list" scanPercent={scanPercent} />
           </div>
           <SplittingQueue

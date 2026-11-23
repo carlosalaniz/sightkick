@@ -19,7 +19,12 @@ import { downloadSong } from './ipc/downloadSong';
 import { checkStemTools, checkStemToolsUpdate } from './ipc/checkStemTools';
 import { downloadStemTools, cancelStemTools } from './ipc/downloadStemTools';
 import { deleteStemTools } from './ipc/deleteStemTools';
-import { splitSong, cancelSplit, killActiveSplit } from './ipc/splitSong';
+import {
+  splitSong,
+  cancelSplit,
+  killActiveSplit,
+  resumeSplits,
+} from './ipc/splitSong';
 import { listenMidi, loadMidiDeviceList, stopListenMidi } from './ipc/midi';
 import { updateSong } from './ipc/updateSong';
 import { rescanSongs } from './ipc/rescanSongs';
@@ -109,6 +114,7 @@ class AppState {
 
     ipcMain.on('split-song', splitSong);
     ipcMain.on('cancel-split', cancelSplit);
+    ipcMain.on('resume-splits', resumeSplits);
 
     ipcMain.on('update-song', updateSong);
     ipcMain.on('export-pdf', exportPdf);

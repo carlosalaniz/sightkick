@@ -40,4 +40,7 @@ export interface OnlineSong {
 
 export type GameMode = 'perform' | 'practice';
 
+/** What the song picker can open: a sheet-music game mode, or the kit highway. */
+export type PlayChoice = GameMode | 'kit';
+
 export type PracticeRange = { start: number; end: number };

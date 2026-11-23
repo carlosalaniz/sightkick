@@ -2,26 +2,31 @@ import { Button, Modal } from 'antd';
 import { useCallback, useRef, useState } from 'react';
 import { useInput } from '../context/InputContext';
 import { modalStyles, MODAL_ABOVE_POPOVER_Z_INDEX } from '../overlayStyles';
-import { GameMode } from '../types';
+import { PlayChoice } from '../types';
 import { useInputControls } from './useInputControls';
 
-const GAME_MODES: GameMode[] = ['perform', 'practice'];
+const GAME_MODES: PlayChoice[] = ['perform', 'practice', 'kit'];
+const LABELS: Record<PlayChoice, string> = {
+  perform: 'Perform',
+  practice: 'Practice',
+  kit: 'Play on my kit',
+};
 
 export function useGameModeSelector() {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedMode, setSelectedMode] = useState<GameMode>('perform');
-  const resolveRef = useRef<(gameMode?: GameMode) => void>(undefined);
+  const [selectedMode, setSelectedMode] = useState<PlayChoice>('perform');
+  const resolveRef = useRef<(gameMode?: PlayChoice) => void>(undefined);
   const { controlMapping } = useInput();
   const open = useCallback(() => {
     resolveRef.current?.(undefined);
     setSelectedMode('perform');
     setIsOpen(true);
 
-    return new Promise<GameMode | undefined>((resolve) => {
+    return new Promise<PlayChoice | undefined>((resolve) => {
       resolveRef.current = resolve;
     });
   }, []);
-  const close = useCallback((gameMode?: GameMode) => {
+  const close = useCallback((gameMode?: PlayChoice) => {
     setIsOpen(false);
     resolveRef.current?.(gameMode);
     resolveRef.current = undefined;
@@ -70,7 +75,7 @@ export function useGameModeSelector() {
             type={name === selectedMode ? 'primary' : 'default'}
             onClick={() => close(name)}
           >
-            <div className="capitalize">{name}</div>
+            <div>{LABELS[name]}</div>
           </Button>
         ))}
       </div>

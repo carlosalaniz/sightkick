@@ -37,6 +37,21 @@ export type JudgeHitHandler = (pos: NotePos, prefixes: string[]) => void;
 
 export type JudgeGateHandler = (open: boolean) => void;
 
+/** A scored hit with its timing, for views that grade or coach timing. */
+export interface JudgedHit {
+  pos: NotePos;
+  /** Chart tick of the note that was hit. */
+  tick: number;
+  /** Key prefixes (e.g. `c/5`) newly hit on that note. */
+  prefixes: string[];
+  /** Hit time minus note time, in seconds; negative is early. Frame-quantized. */
+  offsetSeconds: number;
+  controlId: string;
+  value: number;
+}
+
+export type JudgedHitHandler = (hit: JudgedHit) => void;
+
 export interface JudgeSettings {
   /** Half-width of the hit window around each note, in seconds. */
   hitToleranceSeconds: number;

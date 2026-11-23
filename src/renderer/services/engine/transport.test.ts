@@ -31,7 +31,8 @@ const fakeContext = () => {
     destination: {},
     gainNodes,
     bufferSources,
-    resume: () => Promise.resolve(),
+    resume: vi.fn(() => Promise.resolve()),
+    suspend: vi.fn(() => Promise.resolve()),
     createGain: () => {
       const gain = {
         value: 0,
@@ -268,6 +269,34 @@ describe('Transport', () => {
 
     expect(engine.getSnapshot().isReady).toBe(false);
     expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds and releases playback in place for wait mode', async () => {
+    const { engine, player } = await setup();
+    const ctx = MockAudioPlayer.instances[0].context;
+
+    engine.hold();
+    expect(ctx.suspend).not.toHaveBeenCalled();
+
+    engine.playFromTick(1920);
+    engine.hold();
+    engine.hold();
+
+    expect(engine.isHeld).toBe(true);
+    expect(ctx.suspend).toHaveBeenCalledTimes(1);
+    expect(engine.getSnapshot().isPlaying).toBe(true);
+
+    ctx.resume.mockClear();
+    engine.release();
+
+    expect(engine.isHeld).toBe(false);
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
+    expect(player.start).toHaveBeenCalledTimes(1);
+
+    engine.hold();
+    engine.pause();
+
+    expect(engine.isHeld).toBe(false);
   });
 
   it('plays a tick immediately when the count-in is disabled', async () => {

@@ -38,6 +38,11 @@ export class InputBus {
     };
   };
 
+  /** Feeds a synthetic event to subscribers, as if a device sent it (pad taps, demo play). */
+  inject = (event: InputEvent): void => {
+    this.listeners.forEach((listener) => listener(event));
+  };
+
   capture = (listener: (event: InputEvent) => void): (() => void) => {
     this.captureListener = listener;
 
