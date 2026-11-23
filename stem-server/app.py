@@ -67,6 +67,8 @@ OGG_QUALITY = os.environ.get("SK_OGG_QUALITY", "6")
 # Stems whose peak stays below this (about -50 dBFS) are treated as empty.
 SILENCE_PEAK = 10 ** (-50 / 20)
 ALLOWED_ORIGINS = os.environ.get("SK_ALLOWED_ORIGINS", "*").split(",")
+# How often the background threads check whether the app is shutting down.
+THREAD_POLL_SECONDS = 0.5
 
 # Model stem name -> Clone Hero file name. Anything the model calls "other"
 # (or an instrumental remainder) becomes "song", the generic backing track.
@@ -497,7 +499,7 @@ def process(job: Job) -> None:
     job.set(status="done", stage="done", progress=100)
 
 
-def worker() -> None:
+def worker(stop: threading.Event) -> None:
     global current_job
     try:
         # Warm up the default preset so the first split doesn't wait for it.
@@ -505,8 +507,13 @@ def worker() -> None:
     except Exception:  # noqa: BLE001 - reported through /health
         log.exception("Default model failed to load")
 
-    while True:
-        job_id = pending.get()
+    while not stop.is_set():
+        try:
+            # Wakes up now and then to notice `stop`, so a shutdown (or a test
+            # client closing) doesn't leave this thread behind.
+            job_id = pending.get(timeout=THREAD_POLL_SECONDS)
+        except queue.Empty:
+            continue
         job = jobs.get(job_id)
         if not job or job.cancelled:
             continue
@@ -527,9 +534,8 @@ def worker() -> None:
                     inflight.pop(job.cache_key, None)
 
 
-def janitor() -> None:
-    while True:
-        time.sleep(60)
+def janitor(stop: threading.Event) -> None:
+    while not stop.wait(60):
         cutoff = time.time() - JOB_TTL_SECONDS
         with lock:
             # Queued jobs are kept however long they wait; only finished,
@@ -549,9 +555,18 @@ async def lifespan(_app: FastAPI):
         shutil.rmtree(CACHE_DIR / ".tmp", ignore_errors=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         log.info("Caching splits in %s", CACHE_DIR)
-    threading.Thread(target=worker, daemon=True, name="separator").start()
-    threading.Thread(target=janitor, daemon=True, name="janitor").start()
+    stop = threading.Event()
+    threads = [
+        threading.Thread(target=worker, args=(stop,), daemon=True, name="separator"),
+        threading.Thread(target=janitor, args=(stop,), daemon=True, name="janitor"),
+    ]
+    for thread in threads:
+        thread.start()
     yield
+    stop.set()
+    for thread in threads:
+        # A model pass can't be interrupted; don't hold up shutdown for it.
+        thread.join(timeout=THREAD_POLL_SECONDS * 2)
 
 
 app = FastAPI(title="SightKick stem server", lifespan=lifespan)
