@@ -365,21 +365,21 @@ describe('Judge', () => {
     expect(engine.falseHitCount).toBe(0);
   });
 
-  it('gives a hit to a held note before a nearer one on the same pad', () => {
+  it('gives a hit to a priority target before a nearer one on the same pad', () => {
     // Held 60 ms after the note at 480; the next 16th (100 ms on) is nearer.
     const { engine } = setup(
       { measures: [measure([note(['c/5'], 480), note(['c/5'], 576)])] },
       { tick: 538 },
     );
 
-    engine.setFocus([480]);
+    engine.setPriorityTargets([480], { velocity: 'graded' });
     engine.handleInput(hit('midi:38'));
 
     expect(engine.isHit(480, 'c/5')).toBe(true);
     expect(engine.isHit(576, 'c/5')).toBe(false);
   });
 
-  it('takes a held ghost or accent note at any velocity', () => {
+  it('takes a ghost priority target at any velocity only when told to', () => {
     const { engine } = setup(
       {
         measures: [measure([note(['c/5'], 480, { ghosts: ['c/5'] })])],
@@ -390,12 +390,31 @@ describe('Judge', () => {
     engine.handleInput(hit('midi:38', 127));
     expect(engine.isHit(480, 'c/5')).toBe(false);
 
-    engine.setFocus([480]);
+    engine.setPriorityTargets([480], { velocity: 'graded' });
+    engine.handleInput(hit('midi:38', 127));
+    expect(engine.isHit(480, 'c/5')).toBe(false);
+
+    engine.setPriorityTargets([480], { velocity: 'any' });
     engine.handleInput(hit('midi:38', 127));
     expect(engine.isHit(480, 'c/5')).toBe(true);
   });
 
-  it('falls back to the nearest note when no held note matches the pad', () => {
+  it('judges velocity as usual again once the priority targets are cleared', () => {
+    const { engine } = setup(
+      {
+        measures: [measure([note(['c/5'], 480, { ghosts: ['c/5'] })])],
+      },
+      { tick: 500 },
+    );
+
+    engine.setPriorityTargets([480], { velocity: 'any' });
+    engine.clearPriorityTargets();
+    engine.handleInput(hit('midi:38', 127));
+
+    expect(engine.isHit(480, 'c/5')).toBe(false);
+  });
+
+  it('falls back to the nearest note when no priority target matches the pad', () => {
     const { engine } = setup(
       {
         mapping: { snare: ['midi:38'], kick: ['midi:36'] },
@@ -404,7 +423,7 @@ describe('Judge', () => {
       { tick: 500 },
     );
 
-    engine.setFocus([480]);
+    engine.setPriorityTargets([480], { velocity: 'any' });
     engine.handleInput(hit('midi:38'));
 
     expect(engine.isHit(500, 'c/5')).toBe(true);

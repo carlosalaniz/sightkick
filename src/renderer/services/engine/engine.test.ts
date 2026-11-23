@@ -700,3 +700,57 @@ describe('Engine mute drums on miss', () => {
     );
   });
 });
+
+describe('Engine wait mode', () => {
+  async function waitSetup() {
+    const ctx = await setup({
+      renderData: [
+        measureData(
+          0,
+          1920,
+          [rendered(480, staveNote(['c/5']))],
+          [
+            {
+              tick: 480,
+              isRest: false,
+              notes: ['c/5'],
+              ghosts: ['c/5'],
+            } as Note,
+          ],
+        ),
+      ],
+    });
+
+    ctx.engine.setMapping({ snare: ['midi:38'] });
+
+    return ctx;
+  }
+
+  function playTo(player: MockPlayer, seconds: number) {
+    player.currentTime = seconds;
+    flushFrame();
+  }
+
+  it('gives a held ghost note a loud hit from outside its window', async () => {
+    const { engine, player } = await waitSetup();
+
+    engine.playFromTick(0);
+    playTo(player, 0.8); // 300 ms past the note at 0.5 s
+    engine.hold([480]);
+    emitInput('midi:38', 127);
+
+    expect(engine.isHit(480, 'c/5')).toBe(true);
+  });
+
+  it('judges the same note as usual once released', async () => {
+    const { engine, player } = await waitSetup();
+
+    engine.playFromTick(0);
+    playTo(player, 0.55);
+    engine.hold([480]);
+    engine.release();
+    emitInput('midi:38', 127); // too loud for a ghost note
+
+    expect(engine.isHit(480, 'c/5')).toBe(false);
+  });
+});

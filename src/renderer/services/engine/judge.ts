@@ -9,6 +9,7 @@ import {
   JudgedHitHandler,
   LoopRegion,
   NoteEntry,
+  PriorityTargetOptions,
 } from './types';
 import {
   ACCENT_VALUE_THRESHOLD,
@@ -18,6 +19,16 @@ import {
 } from './constants';
 import { keyPrefix } from './helpers';
 import { lowerBound } from '../../helpers';
+import { assertNever } from '../../../shared/assertNever';
+
+const NO_PRIORITY_TARGETS: PriorityTarget = {
+  ticks: new Set(),
+  velocity: 'graded',
+};
+
+interface PriorityTarget extends PriorityTargetOptions {
+  ticks: Set<number>;
+}
 
 export class Judge {
   private chart: ParsedChart | undefined;
@@ -41,8 +52,8 @@ export class Judge {
   private gateTick: number | undefined;
   private gateLookaheadSeconds = 0;
   private gateListeners = new Set<JudgeGateHandler>();
-  /** Ticks a hit is offered to first (wait mode's held notes). */
-  private focusTicks = new Set<number>();
+  /** Notes a hit is offered to first, and how their velocity is judged. */
+  private priority: PriorityTarget = NO_PRIORITY_TARGETS;
 
   setContext(context: JudgeContext): void {
     const chartChanged = this.chart !== context.chart;
@@ -71,14 +82,20 @@ export class Judge {
   }
 
   /**
-   * Notes the song is holding for (wait mode). A hit that matches one of them
-   * goes to it, at any distance and any velocity, before the nearest note is
-   * considered: the held note is what the player is reaching for, and the song
-   * stops a little after it, so a following note on the same pad can be
-   * nearer and would otherwise take every hit, leaving the song stuck.
+   * Notes a matching hit goes to first, at any distance from the playhead,
+   * before the nearest note is considered; `velocity` says whether their
+   * accents and ghosts still need the right velocity. Which notes, and why,
+   * is the caller's policy (wait mode's held notes, see Engine.hold).
    */
-  setFocus(ticks: Iterable<number>): void {
-    this.focusTicks = new Set(ticks);
+  setPriorityTargets(
+    ticks: Iterable<number>,
+    options: PriorityTargetOptions,
+  ): void {
+    this.priority = { ticks: new Set(ticks), ...options };
+  }
+
+  clearPriorityTargets(): void {
+    this.priority = NO_PRIORITY_TARGETS;
   }
 
   /** Half-width of the hit window, in seconds, on either side of a note. */
@@ -184,7 +201,7 @@ export class Judge {
     this.hits.clear();
     this.hitTotal = 0;
     this.falseHitTicks = [];
-    this.focusTicks.clear();
+    this.priority = NO_PRIORITY_TARGETS;
     this.resetGate(undefined);
   }
 
@@ -295,16 +312,16 @@ export class Judge {
     return tick >= seamTick ? tick - (loop.endTick - loop.startTick) : tick;
   }
 
-  /** The earliest held note that can take the hit, if any. */
-  private focusedEntry(
+  /** The earliest priority target that can take the hit, if any. */
+  private priorityEntry(
     takes: (entry: NoteEntry) => boolean,
   ): NoteEntry | undefined {
-    const ticks = [...this.focusTicks].sort((a, b) => a - b);
+    const ticks = [...this.priority.ticks].sort((a, b) => a - b);
 
-    for (const focusTick of ticks) {
+    for (const targetTick of ticks) {
       for (
-        let i = this.firstNoteAtOrAfter(focusTick);
-        i < this.noteIndex.length && this.noteIndex[i].tick === focusTick;
+        let i = this.firstNoteAtOrAfter(targetTick);
+        i < this.noteIndex.length && this.noteIndex[i].tick === targetTick;
         i += 1
       ) {
         if (takes(this.noteIndex[i])) {
@@ -414,13 +431,13 @@ export class Judge {
 
         return expectedPrefixes.has(p) && !this.isHit(entry.tick, p);
       });
-    let best = this.focusedEntry(takes);
-    const focused = best !== undefined;
+    let best = this.priorityEntry(takes);
+    const prioritized = best !== undefined;
     let bestDist = Infinity;
 
     for (
       let i = this.firstNoteAtOrAfter(tick - toleranceTicks);
-      !focused && i < this.noteIndex.length;
+      !prioritized && i < this.noteIndex.length;
       i += 1
     ) {
       const entry = this.noteIndex[i];
@@ -447,7 +464,8 @@ export class Judge {
     const { pos } = best;
     const accentPrefixes = new Set((hit.accents ?? []).map(keyPrefix));
     const ghostPrefixes = new Set((hit.ghosts ?? []).map(keyPrefix));
-    const passesVelocity = (prefix: string) => {
+    const velocity = prioritized ? this.priority.velocity : 'graded';
+    const passesGradedVelocity = (prefix: string) => {
       if (accentPrefixes.has(prefix)) {
         return value > ACCENT_VALUE_THRESHOLD;
       }
@@ -458,15 +476,26 @@ export class Judge {
 
       return true;
     };
-    const newPrefixes = hit.notes.map(keyPrefix).filter(
-      (p) =>
-        expectedPrefixes.has(p) &&
-        !this.isHit(hit.tick, p) &&
-        // A held note takes any velocity: wait mode is for finding the
-        // pads, and a ghost note a keyboard can't play softly enough for
-        // would hold the song forever.
-        (focused || passesVelocity(p)),
-    );
+    const passesVelocity = (prefix: string): boolean => {
+      switch (velocity) {
+        case 'any':
+          return true;
+
+        case 'graded':
+          return passesGradedVelocity(prefix);
+
+        default:
+          return assertNever(velocity, 'target velocity');
+      }
+    };
+    const newPrefixes = hit.notes
+      .map(keyPrefix)
+      .filter(
+        (p) =>
+          expectedPrefixes.has(p) &&
+          !this.isHit(hit.tick, p) &&
+          passesVelocity(p),
+      );
 
     if (newPrefixes.length === 0) {
       this.maybeRecordFalseHit(tick, toleranceTicks);

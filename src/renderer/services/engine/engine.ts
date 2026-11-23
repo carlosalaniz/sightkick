@@ -17,7 +17,18 @@ import {
   JudgeSettings,
   LoopRegion,
   PlaybackSnapshot,
+  PriorityTargetOptions,
 } from './types';
+
+/**
+ * Wait mode's policy for the notes it holds for. A hit on their pad goes to
+ * them first, however far off: the song stops a little after the held note,
+ * so a following note on the same pad can be nearer and would otherwise take
+ * every hit, leaving the song stuck. And at any velocity: wait mode is for
+ * finding the pads, and a ghost note a keyboard can't play softly enough for
+ * would hold the song forever.
+ */
+const WAIT_MODE_TARGETS: PriorityTargetOptions = { velocity: 'any' };
 
 export class Engine {
   private transport: Transport;
@@ -146,7 +157,7 @@ export class Engine {
   }
 
   playFromTick(tick: number): void {
-    this.judge.setFocus([]);
+    this.judge.clearPriorityTargets();
     this.transport.playFromTick(tick);
   }
 
@@ -163,12 +174,12 @@ export class Engine {
    * notes it waits for; a matching hit goes to them first.
    */
   hold(ticks: Iterable<number> = []): void {
-    this.judge.setFocus(ticks);
+    this.judge.setPriorityTargets(ticks, WAIT_MODE_TARGETS);
     this.transport.hold();
   }
 
   release(): void {
-    this.judge.setFocus([]);
+    this.judge.clearPriorityTargets();
     this.transport.release();
   }
 
@@ -178,7 +189,7 @@ export class Engine {
 
   /** Also ends a hold (wait mode's run-up rewinds this way). */
   seekSeconds(seconds: number): void {
-    this.judge.setFocus([]);
+    this.judge.clearPriorityTargets();
     this.transport.seekSeconds(seconds);
   }
 

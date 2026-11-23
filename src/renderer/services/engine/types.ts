@@ -68,6 +68,17 @@ export interface JudgeSettings {
   muteDrumsOnMiss: boolean;
 }
 
+/**
+ * How the judge treats priority targets' velocity:
+ * - graded: accents and ghost notes need the right velocity, as everywhere.
+ * - any: any velocity counts.
+ */
+export type TargetVelocity = 'graded' | 'any';
+
+export interface PriorityTargetOptions {
+  velocity: TargetVelocity;
+}
+
 export interface JudgeContext {
   chart: ParsedChart | undefined;
   measures: Measure[];
