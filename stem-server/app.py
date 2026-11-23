@@ -443,8 +443,19 @@ def cache_store(job: Job) -> None:
         try:
             tmp.rename(entry)
         except OSError:
-            # Another job stored the same key first; theirs is just as good.
-            shutil.rmtree(tmp, ignore_errors=True)
+            # An entry is already there. Either another job stored this key
+            # first, and its complete entry is as good as ours, or it's the
+            # incomplete entry (a stem file went missing) that made this job
+            # split again. Replace that one, or every later request for the
+            # song would miss the cache and split it again too.
+            if cache_lookup(key):
+                shutil.rmtree(tmp, ignore_errors=True)
+            else:
+                broken = CACHE_DIR / ".tmp" / f"broken-{uuid.uuid4().hex}"
+                entry.rename(broken)
+                tmp.rename(entry)
+                shutil.rmtree(broken, ignore_errors=True)
+                log.info("Replaced incomplete cache entry %s", key)
         stems = cache_lookup(key)
         if stems:
             for path in job.stems.values():

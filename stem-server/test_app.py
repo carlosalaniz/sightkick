@@ -266,6 +266,24 @@ def test_incomplete_cache_entry_is_a_miss(client, lib):
     assert lib.runs == 2
 
 
+def test_a_resplit_replaces_the_incomplete_cache_entry(client, lib):
+    audio = wav_bytes(670)
+    wait_done(client, post(client, audio)["id"])
+    key = app.cache_key([hashlib.sha256(audio).hexdigest()], "stems", "fast")
+    (app.cache_entry(key) / "drums.ogg").unlink()
+
+    healed = wait_done(client, post(client, audio)["id"])
+    assert healed["status"] == "done" and healed["cached"] is False
+    assert (app.cache_entry(key) / "drums.ogg").is_file()
+    assert client.get(f"/jobs/{healed['id']}/stems/drums").status_code == 200
+
+    third = post(client, audio)
+    assert third["cached"] is True
+    assert lib.runs == 2
+    # The broken entry was moved aside and deleted, not left behind.
+    assert not any((Path(os.environ["SK_CACHE_DIR"]) / ".tmp").iterdir())
+
+
 def test_instrument_stems_also_come_mixed_into_a_backing_track(client, lib):
     lib.stems = ["Drums", "Bass", "Vocals", "Other"]
     job = wait_done(client, post(client, wav_bytes(770))["id"])
