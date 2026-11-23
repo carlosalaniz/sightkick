@@ -7,18 +7,17 @@ import {
   splitInputs,
   SplitParts,
 } from '../songData';
-import { DEFAULT_STEM_SERVER_URL } from '../stemServerUrl';
+import {
+  DEFAULT_STEM_SERVER_URL,
+  STEM_QUALITY_KEY,
+  STEM_SERVER_URL_KEY,
+  StemQuality,
+} from '../stemServerUrl';
 import { getFile, getRoot, joinPath, loadSongs, saveSongs } from './library';
 import { buildSong, clearAssetCache, listSongDir, toUiSong } from './songs';
 
 // Client for the optional stem server (stem-server/ in this repo), which splits
 // a single mixed audio file into drums, bass, vocals, ... so drums can be muted.
-
-export const STEM_SERVER_URL_KEY = 'settings.stemServerUrl';
-
-export const STEM_QUALITY_KEY = 'settings.stemQuality';
-
-export type StemQuality = 'fast' | 'best';
 
 const POLL_MS = 1000;
 const ASSET_PREFIX = 'sk-asset:';

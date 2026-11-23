@@ -2,24 +2,30 @@ import { useState } from 'react';
 import { Button, Input } from 'antd';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowsRotate } from '@fortawesome/free-solid-svg-icons';
-import { DEFAULT_STEM_SERVER_URL } from '../../../stemServerUrl';
+import {
+  DEFAULT_STEM_SERVER_URL,
+  STEM_QUALITIES,
+  STEM_QUALITY_KEY,
+  STEM_SERVER_URL_KEY,
+  StemQuality,
+} from '../../../stemServerUrl';
 import { usePersisted } from '../../hooks/usePersisted';
 import { useStemToolsContext } from '../../context/StemToolsContext';
 import { SettingLabel } from '../SettingsButton/SettingLabel';
 import { Tooltip } from '../Tooltip';
 
-// Must match src/web/stem-server.ts.
-const URL_KEY = 'settings.stemServerUrl';
-const QUALITY_KEY = 'settings.stemQuality';
 const DEFAULT_URL = DEFAULT_STEM_SERVER_URL;
 
 /** Browser build only: where the optional stem-splitting server runs. */
 export function StemServerSettings() {
   const { stemToolsStatus } = useStemToolsContext();
-  const [savedUrl, setSavedUrl] = usePersisted(URL_KEY, DEFAULT_URL);
+  const [savedUrl, setSavedUrl] = usePersisted(
+    STEM_SERVER_URL_KEY,
+    DEFAULT_URL,
+  );
   const [draft, setDraft] = useState(savedUrl);
-  const [quality, setQuality] = usePersisted<'fast' | 'best'>(
-    QUALITY_KEY,
+  const [quality, setQuality] = usePersisted<StemQuality>(
+    STEM_QUALITY_KEY,
     'fast',
   );
   const connected = stemToolsStatus === 'ready';
@@ -72,7 +78,7 @@ export function StemServerSettings() {
           tooltip="Fast uses HTDemucs, the same model as the desktop app. Best uses BS-RoFormer-SW: cleaner drums, but several times slower."
         />
         <div className="flex items-center gap-1" data-testid="stem-quality">
-          {(['fast', 'best'] as const).map((value) => (
+          {STEM_QUALITIES.map((value) => (
             <Button
               key={value}
               size="small"

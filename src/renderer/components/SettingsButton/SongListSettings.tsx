@@ -15,9 +15,8 @@ import { DISCORD_URL } from './constants';
 import { IS_WEB } from '../../platform';
 import { StemServerSettings } from '../StemServerSettings';
 import { BUILD, buildLabel } from '../../../buildInfo';
+import { BROWSER_ROOT_NAME } from '../../../browserLibrary';
 
-// Must match BROWSER_ROOT_NAME in src/web/library.ts.
-const BROWSER_STORAGE = 'Browser storage';
 const canPickFolder = () =>
   typeof (window as { showDirectoryPicker?: unknown }).showDirectoryPicker ===
   'function';
@@ -31,7 +30,7 @@ function folderTooltip(currentPath: string | null | undefined) {
     return 'Songs you download are saved in this browser. Use Chrome or Edge to open a folder on your computer instead.';
   }
 
-  return currentPath === BROWSER_STORAGE
+  return currentPath === BROWSER_ROOT_NAME
     ? 'Songs are saved in this browser. Click to use a folder on your computer, like your Clone Hero library.'
     : 'Pick a different folder on your computer';
 }
@@ -56,7 +55,7 @@ export function SongListSettings({
   const switchToBrowserStorage = () =>
     window.electron.ipcRenderer.sendMessage('rescan-songs', 'browser');
   const showBrowserStorageButton =
-    IS_WEB && !!currentPath && currentPath !== BROWSER_STORAGE;
+    IS_WEB && !!currentPath && currentPath !== BROWSER_ROOT_NAME;
 
   return (
     <>

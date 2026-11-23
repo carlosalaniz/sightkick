@@ -1,4 +1,5 @@
 import { SongData, StorageSchema } from '../types';
+import { BROWSER_ROOT_NAME } from '../browserLibrary';
 import { idbGet, idbSet } from './idb';
 
 // Where the song library lives in the browser build:
@@ -13,8 +14,6 @@ export interface LibraryRoot {
   handle: FileSystemDirectoryHandle;
   name: string;
 }
-
-export const BROWSER_ROOT_NAME = 'Browser storage';
 
 const ROOT_KIND_KEY = 'rootKind';
 const FOLDER_HANDLE_KEY = 'folderHandle';
