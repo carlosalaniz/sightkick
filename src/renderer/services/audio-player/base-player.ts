@@ -2,6 +2,9 @@ import { BaseAudioTrack } from './base-track';
 import { LoopWindow, TrackConfig } from './types';
 import { downmixToMono, trimTrailingSilence } from './helpers';
 
+/** An output timestamp older than this is from before a suspend: don't trust it. */
+const STALE_OUTPUT_STAMP_SECONDS = 0.1;
+
 export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   context: AudioContext;
   masterGain: GainNode;
@@ -78,8 +81,73 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
     return this.context.outputLatency || this.context.baseLatency || 0;
   }
 
+  private masterVolume = 1;
+
+  /** Multiplies the master volume; wait mode fades it around a hold. */
+  private fadeLevel = 1;
+
   setMasterVolume(volume: number): void {
-    this.masterGain.gain.setValueAtTime(volume, this.context.currentTime);
+    this.masterVolume = volume;
+    this.masterGain.gain.setValueAtTime(
+      volume * this.fadeLevel,
+      this.context.currentTime,
+    );
+  }
+
+  /**
+   * Glides the output to `level` (0..1) of the master volume, so stopping and
+   * starting the audio for wait mode doesn't click.
+   */
+  fadeTo(level: number, seconds: number): void {
+    const { gain } = this.masterGain;
+    const now = this.context.currentTime;
+
+    this.fadeLevel = level;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+
+    if (seconds > 0) {
+      gain.linearRampToValueAtTime(this.masterVolume * level, now + seconds);
+    } else {
+      gain.setValueAtTime(this.masterVolume * level, now);
+    }
+  }
+
+  /**
+   * Context time of the audio reaching the speakers right now. The browser's
+   * output timestamp moves smoothly; currentTime only advances once per audio
+   * buffer (21 ms steps with a playback-latency context in Chrome on a Mac,
+   * more on Android), so animation driven by it stalls every few frames.
+   * While the context isn't running its clock is still and there is nothing
+   * in flight to the speakers.
+   */
+  protected audibleContextTime(): number {
+    const ctx = this.context;
+
+    if (ctx.state !== 'running') {
+      return ctx.currentTime;
+    }
+
+    const stamp =
+      typeof ctx.getOutputTimestamp === 'function'
+        ? ctx.getOutputTimestamp()
+        : undefined;
+    const since =
+      stamp?.performanceTime && stamp.contextTime !== undefined
+        ? (performance.now() - stamp.performanceTime) / 1000
+        : undefined;
+
+    // No stamp yet, or one from before a suspend: fall back to the estimate.
+    if (
+      stamp?.contextTime === undefined ||
+      since === undefined ||
+      since < 0 ||
+      since > STALE_OUTPUT_STAMP_SECONDS
+    ) {
+      return ctx.currentTime - this.outputLatency;
+    }
+
+    return Math.min(stamp.contextTime + since, ctx.currentTime);
   }
 
   contextTimeForSongTime(songTime: number): number {

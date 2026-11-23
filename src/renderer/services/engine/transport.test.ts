@@ -3,6 +3,7 @@ import { AudioPlayer, TrackConfig } from '../audio-player';
 import { Measure, ParsedChart } from '../../../chart-parser/types';
 import { Transport } from './transport';
 import { TransportContext } from './types';
+import { HOLD_FADE_SECONDS } from './constants';
 
 vi.mock('../click-track/metronome', () => ({
   renderClickBuffers: () => ({ downbeat: {}, beat: {} }),
@@ -332,6 +333,43 @@ describe('Transport', () => {
     player.currentTime = 2.01;
     flushFrame();
     expect(engine.timeStore.get()).toBe(2.01);
+  });
+
+  it('fades out before freezing and back in after, and a hit during the fade never stops the song', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const { engine } = await setup();
+      const mock = MockAudioPlayer.instances[0];
+      const ctx = mock.context;
+      const fadeTo = vi.fn();
+
+      Object.assign(mock, { fadeTo });
+      engine.playFromTick(0);
+      await flush();
+      fadeTo.mockClear();
+
+      // A hit 5 ms into the fade: a dip, no freeze.
+      engine.hold();
+      expect(fadeTo).toHaveBeenLastCalledWith(0, HOLD_FADE_SECONDS);
+      vi.advanceTimersByTime(5);
+      engine.release();
+      vi.advanceTimersByTime(50);
+      expect(ctx.suspend).not.toHaveBeenCalled();
+      expect(fadeTo).toHaveBeenLastCalledWith(1, HOLD_FADE_SECONDS);
+
+      // No hit: freeze once the fade is done, fade back in after the resume.
+      engine.hold();
+      vi.advanceTimersByTime(HOLD_FADE_SECONDS * 1000);
+      expect(ctx.suspend).toHaveBeenCalledTimes(1);
+      fadeTo.mockClear();
+      engine.release();
+      expect(fadeTo).not.toHaveBeenCalled();
+      await flush();
+      expect(fadeTo).toHaveBeenLastCalledWith(1, HOLD_FADE_SECONDS);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('plays a tick immediately when the count-in is disabled', async () => {

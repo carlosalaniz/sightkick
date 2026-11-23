@@ -25,6 +25,7 @@ import {
   CLICK_GAIN_RAMP_SECONDS,
   COUNT_IN_MIN_VOLUME,
   HIT_TOLERANCE_SECONDS,
+  HOLD_FADE_SECONDS,
   LOOKAHEAD_SECONDS,
   SNAPSHOT_KEYS,
 } from './constants';
@@ -54,6 +55,7 @@ export class Transport {
    * the song stutter between hold and release.
    */
   private frozenTime: number | undefined;
+  private freezeTimer: ReturnType<typeof setTimeout> | undefined;
   private speedPlayer: SpeedControllableAudioPlayer | undefined;
   private state: PlaybackState = 'idle';
   private isStarted = false;
@@ -363,10 +365,14 @@ export class Transport {
   }
 
   /**
-   * Freezes playback exactly where it is (audio, click and song time) without
-   * leaving the playing state, for wait mode. `release` carries on from the
-   * same spot with no count-in. Suspending the AudioContext stops its clock,
-   * which every player and the click are scheduled against.
+   * Freezes playback where it is (audio, click and song time) without leaving
+   * the playing state, for wait mode. `release` carries on from the same spot
+   * with no count-in. Suspending the AudioContext stops its clock, which every
+   * player and the click are scheduled against.
+   *
+   * The audio fades out over HOLD_FADE_SECONDS first, since cutting it off
+   * mid-waveform clicks; a hit during the fade cancels the freeze, so a
+   * slightly late hit dips the volume instead of stopping the song.
    */
   hold(): void {
     if (!this.audioPlayer || this.state !== 'playing' || this.held) {
@@ -374,7 +380,32 @@ export class Transport {
     }
 
     this.held = true;
-    // Still frozen from a release whose resume hasn't finished: keep that.
+
+    const player = this.audioPlayer;
+
+    // Still frozen from a release whose resume hasn't finished (and still
+    // silent): freeze again at once.
+    if (!player.fadeTo || this.frozenTime !== undefined) {
+      this.freeze();
+
+      return;
+    }
+
+    player.fadeTo(0, HOLD_FADE_SECONDS);
+    this.freezeTimer = setTimeout(() => {
+      this.freezeTimer = undefined;
+
+      if (this.held) {
+        this.freeze();
+      }
+    }, HOLD_FADE_SECONDS * 1000);
+  }
+
+  private freeze(): void {
+    if (!this.audioPlayer) {
+      return;
+    }
+
     this.frozenTime ??= this.audioPlayer.currentTime;
     void this.audioPlayer.context.suspend().catch(() => {});
   }
@@ -386,24 +417,46 @@ export class Transport {
 
     this.held = false;
 
-    if (!this.audioPlayer || this.state !== 'playing') {
-      this.frozenTime = undefined;
+    const player = this.audioPlayer;
+
+    if (this.freezeTimer !== undefined) {
+      // Hit during the fade: the song never stopped, just bring it back up.
+      clearTimeout(this.freezeTimer);
+      this.freezeTimer = undefined;
+      player?.fadeTo?.(1, HOLD_FADE_SECONDS);
 
       return;
     }
 
-    void this.audioPlayer.context
+    if (!player || this.state !== 'playing') {
+      this.frozenTime = undefined;
+      player?.fadeTo?.(1, 0);
+
+      return;
+    }
+
+    void player.context
       .resume()
       .catch(() => {})
       .then(() => {
         if (!this.held) {
           this.frozenTime = undefined;
+          player.fadeTo?.(1, HOLD_FADE_SECONDS);
         }
       });
   }
 
   /** Ends a hold for a new start, seek or pause, which set their own time. */
   private clearHold(): void {
+    if (this.freezeTimer !== undefined) {
+      clearTimeout(this.freezeTimer);
+      this.freezeTimer = undefined;
+    }
+
+    if (this.held || this.frozenTime !== undefined) {
+      this.audioPlayer?.fadeTo?.(1, 0);
+    }
+
     this.held = false;
     this.frozenTime = undefined;
   }
@@ -528,6 +581,7 @@ export class Transport {
 
   dispose(): void {
     this.disposed = true;
+    clearTimeout(this.freezeTimer);
     this.playGeneration += 1;
     this.clearScheduling();
     this.clickTrack?.dispose();

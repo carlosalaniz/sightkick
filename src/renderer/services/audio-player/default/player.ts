@@ -91,10 +91,9 @@ export class DefaultAudioPlayer
       return 0;
     }
 
-    const latency = this.context.state === 'running' ? this.outputLatency : 0;
     const unwrapped = Math.max(
       this.offset,
-      this.context.currentTime - this.startedAt + this.offset - latency,
+      this.audibleContextTime() - this.startedAt + this.offset,
     );
 
     return this.wrapLoopTime(unwrapped);

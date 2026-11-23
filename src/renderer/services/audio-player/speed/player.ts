@@ -415,12 +415,10 @@ export class SpeedAudioPlayer
       return 0;
     }
 
-    const latency = this.context.state === 'running' ? this.outputLatency : 0;
     const unwrapped = Math.max(
       this.offset,
-      (this.context.currentTime - this.startedAt) * this._playbackSpeed +
-        this.offset -
-        latency * this._playbackSpeed,
+      (this.audibleContextTime() - this.startedAt) * this._playbackSpeed +
+        this.offset,
     );
 
     if (this.hasActiveLoop()) {

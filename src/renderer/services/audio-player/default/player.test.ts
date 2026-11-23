@@ -50,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('AudioPlayer', () => {
@@ -256,5 +257,55 @@ describe('AudioPlayer', () => {
       'bass',
       'vocals',
     ]);
+  });
+
+  it('reads song time from the output timestamp, which moves every frame', async () => {
+    const { player } = await makePlayer();
+
+    context.currentTime = 10;
+    await player.start(2);
+    vi.spyOn(performance, 'now').mockReturnValue(5030);
+    Object.assign(context, {
+      // 10.2 s reached the speakers at 5000 ms; 30 ms have passed since.
+      getOutputTimestamp: () => ({ contextTime: 10.2, performanceTime: 5000 }),
+    });
+    context.currentTime = 10.3;
+
+    expect(player.currentTime).toBeCloseTo(2 + 0.23, 6);
+  });
+
+  it('falls back to the clock minus latency without a fresh output timestamp', async () => {
+    const { player } = await makePlayer();
+
+    context.currentTime = 10;
+    await player.start(2);
+    context.outputLatency = 0.05;
+    context.currentTime = 10.3;
+    vi.spyOn(performance, 'now').mockReturnValue(9000);
+    Object.assign(context, {
+      // From before a suspend: four seconds old.
+      getOutputTimestamp: () => ({ contextTime: 10.1, performanceTime: 5000 }),
+    });
+
+    expect(player.currentTime).toBeCloseTo(2 + 0.25, 6);
+
+    context.state = 'suspended';
+
+    expect(player.currentTime).toBeCloseTo(2 + 0.3, 6);
+  });
+
+  it('fades relative to the master volume and keeps it', async () => {
+    const { player } = await makePlayer();
+    const master = player.masterGain as unknown as FakeGainNode;
+
+    player.setMasterVolume(0.5);
+    player.fadeTo(0, 0.012);
+    expect(master.gain.ramps.at(-1)?.value).toBe(0);
+
+    player.setMasterVolume(0.8);
+    expect(master.gain.value).toBe(0);
+
+    player.fadeTo(1, 0.012);
+    expect(master.gain.ramps.at(-1)?.value).toBe(0.8);
   });
 });

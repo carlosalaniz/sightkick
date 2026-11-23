@@ -32,6 +32,8 @@ export interface AudioPlayer {
   contextTimeForSongTime(songTime: number): number;
   /** Seconds between scheduling audio and hearing it. */
   outputLatency?: number;
+  /** Glides the output to `level` of the master volume (wait mode's holds). */
+  fadeTo?(level: number, seconds: number): void;
   destroy(): void;
 }
 

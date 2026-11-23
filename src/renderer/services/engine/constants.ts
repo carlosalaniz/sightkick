@@ -54,3 +54,9 @@ export const SNAPSHOT_KEYS: (keyof PlaybackSnapshot)[] = [
   'isReady',
   'duration',
 ];
+
+/**
+ * Wait mode fades the song out over this long before freezing it, and back in
+ * on release: long enough not to click, short enough to stop on time.
+ */
+export const HOLD_FADE_SECONDS = 0.012;
