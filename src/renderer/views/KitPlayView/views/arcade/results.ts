@@ -34,10 +34,12 @@ export function buildResults(
     rules,
     (j) => j.pieceId,
     pieces.map((p) => p.id),
-  ).map((g) => ({
-    piece: pieces.find((p) => p.id === g.key) as KitPiece,
-    summary: g.summary,
-  }));
+  ).flatMap((g) => {
+    // Groups are keyed by these pieces' ids, so every group finds its piece.
+    const piece = pieces.find((p) => p.id === g.key);
+
+    return piece ? [{ piece, summary: g.summary }] : [];
+  });
   const bySection = summarizeBy(
     judgments,
     rules,
