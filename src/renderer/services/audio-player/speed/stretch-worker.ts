@@ -5,6 +5,7 @@ import {
   VoiceGroup,
 } from './build-units';
 import { PcmChannel } from './pcm';
+import { assertNever } from '../../../../shared/assertNever';
 
 type InitMessage = {
   type: 'init';
@@ -79,6 +80,6 @@ self.onmessage = (event: MessageEvent<RequestMessage>) => {
     }
 
     default:
-      break;
+      assertNever(message, 'stretch worker message');
   }
 };

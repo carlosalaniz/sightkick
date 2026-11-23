@@ -7,6 +7,7 @@ import {
   resumeSplits,
   splitSong,
 } from './stem-server';
+import { assertNever } from '../shared/assertNever';
 
 // Browser stand-in for the Electron preload bridge: the renderer keeps calling
 // window.electron.ipcRenderer, and messages are handled in-page instead of by
@@ -43,8 +44,34 @@ function subscribe(channel: string, listener: Listener) {
 const run = (task: Promise<unknown> | void) => {
   task?.catch((error: unknown) => console.error(error));
 };
+/**
+ * Channels only the desktop app handles: app updates, stem tool downloads and
+ * opening folders in the OS file manager. The web build ignores them; any
+ * other channel must be handled below, or the switch doesn't compile.
+ */
+const DESKTOP_ONLY_CHANNELS = [
+  'check-stem-tools-update',
+  'download-stem-tools',
+  'cancel-stem-tools',
+  'delete-stem-tools',
+  'open-song-directory',
+  'midi-error',
+  'check-update',
+  'update-status',
+  'download-update',
+  'install-update',
+] as const satisfies readonly Channels[];
+
+type DesktopOnlyChannel = (typeof DESKTOP_ONLY_CHANNELS)[number];
+
+const isDesktopOnly = (channel: Channels): channel is DesktopOnlyChannel =>
+  (DESKTOP_ONLY_CHANNELS as readonly Channels[]).includes(channel);
 
 function sendMessage(channel: Channels, ...args: unknown[]) {
+  if (isDesktopOnly(channel)) {
+    return;
+  }
+
   switch (channel) {
     case 'check-dev':
       reply(channel, false);
@@ -150,9 +177,7 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     default:
-      // Desktop-only: app updates, stem tool downloads and opening folders
-      // in the OS file manager.
-      break;
+      assertNever(channel, 'IPC channel');
   }
 }
 

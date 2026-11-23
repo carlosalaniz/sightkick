@@ -55,6 +55,25 @@ module.exports = [
     },
   },
   {
+    // Rule 6 of the coding rules: a switch over a union we own lists every
+    // case, with no catch-all default, so adding a variant is a compile-time
+    // to-do list rather than a silent fall-through. Needs type information.
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: __dirname },
+    },
+    rules: {
+      '@typescript-eslint/switch-exhaustiveness-check': [
+        'error',
+        {
+          allowDefaultCaseForExhaustiveSwitch: true,
+          considerDefaultExhaustiveForUnions: false,
+          requireDefaultForNonUnion: false,
+        },
+      ],
+    },
+  },
+  {
     files: ['scripts/**/*.js'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',

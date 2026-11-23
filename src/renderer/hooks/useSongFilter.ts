@@ -34,6 +34,7 @@ export function useSongFilter(songList: Song[], difficulty: Difficulty) {
     }
 
     return [...byDifficulty].sort((a, b) => {
+      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- upstream code, outside the reloaded refactor
       switch (sort.key) {
         case 'name': {
           const cmp = a.name.localeCompare(b.name);
