@@ -971,6 +971,54 @@ describe('Transport', () => {
       expect(player.setPlaybackSpeed).toHaveBeenCalledWith(0.5);
     });
 
+    it('holds a speed change made during a hold until the song runs again', async () => {
+      const { engine, player } = await setup();
+      const ctx = MockAudioPlayer.instances[0].context;
+      const resumes: (() => void)[] = [];
+
+      ctx.resume.mockImplementation(
+        () => new Promise<void>((done) => resumes.push(done)),
+      );
+      engine.playFromTick(0);
+      await flush();
+      engine.hold();
+      engine.setPlaybackSpeed(0.5);
+      expect(player.setPlaybackSpeed).not.toHaveBeenCalled();
+
+      engine.release();
+      expect(player.setPlaybackSpeed).not.toHaveBeenCalled();
+
+      resumes[0]();
+      await flush();
+      expect(player.setPlaybackSpeed).toHaveBeenCalledWith(0.5);
+    });
+
+    it('keeps a held speed change through a resume that a new hold overtook', async () => {
+      const { engine, player } = await setup();
+      const ctx = MockAudioPlayer.instances[0].context;
+      const resumes: (() => void)[] = [];
+
+      ctx.resume.mockImplementation(
+        () => new Promise<void>((done) => resumes.push(done)),
+      );
+      engine.playFromTick(0);
+      await flush();
+      engine.hold();
+      engine.setPlaybackSpeed(0.5);
+      engine.release();
+      engine.hold();
+      engine.release();
+
+      // The first resume settles behind the second hold's suspend.
+      resumes[0]();
+      await flush();
+      expect(player.setPlaybackSpeed).not.toHaveBeenCalled();
+
+      resumes[1]();
+      await flush();
+      expect(player.setPlaybackSpeed).toHaveBeenCalledWith(0.5);
+    });
+
     it('applies a deferred count-in speed change when a seek starts playback', async () => {
       const { engine, player } = await setup({}, { countInEnabled: true });
 

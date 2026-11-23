@@ -29,12 +29,42 @@ import {
   LOOKAHEAD_SECONDS,
   SNAPSHOT_KEYS,
 } from './constants';
+import { assertNever } from '../../../shared/assertNever';
 
 /**
  * How far behind the frozen time a resumed song may read and still count as
  * settling; anything further is a real jump (a loop wrap) and is shown.
  */
 const SETTLE_SECONDS = 0.25;
+
+/**
+ * Wait mode's hold, as one value so no two flags can disagree. `at` is the
+ * song time shown while the hold lasts: a suspended context's player stops
+ * subtracting its output latency, so its own time jumps ahead by it (0.1-0.3 s
+ * on Bluetooth output), and just after a resume its time sits a little behind
+ * the moment it froze. Left to the player, either would step the song past
+ * the held note or back (a backwards step reads as a rewind to the judge).
+ *
+ * - free: no hold; song time is the player's.
+ * - fading: held, fading out before the freeze. `at` is still set when the
+ *   hold began while settling from the last one.
+ * - frozen: held, context suspended (or suspending).
+ * - resuming: released, the resume is in flight. `attempt` tells a stale
+ *   resume (one overtaken by a new hold) from the current one.
+ * - settling: running again; `at` is shown until the live time catches up.
+ */
+type HoldState =
+  | { kind: 'free' }
+  | {
+      kind: 'fading';
+      timer: ReturnType<typeof setTimeout>;
+      at: number | undefined;
+    }
+  | { kind: 'frozen'; at: number }
+  | { kind: 'resuming'; at: number; attempt: number }
+  | { kind: 'settling'; at: number };
+
+const FREE: HoldState = { kind: 'free' };
 
 export class Transport {
   readonly timeStore = new TimeStore();
@@ -52,18 +82,8 @@ export class Transport {
   private createPlayer: AudioPlayerFactory;
   private createdPlayer: AudioPlayer | undefined;
   private audioPlayer: AudioPlayer | undefined;
-  private held = false;
-  /**
-   * Song time at the moment of a hold, reported until the context runs again.
-   * A suspended context's player stops subtracting its output latency, so its
-   * own time jumps ahead by it (0.1-0.3 s on Bluetooth output); left alone,
-   * that jump could carry the held note out of wait mode's window and make
-   * the song stutter between hold and release.
-   */
-  private frozenTime: number | undefined;
-  /** A release's resume is in flight: the context is still frozen. */
-  private resuming = false;
-  private freezeTimer: ReturnType<typeof setTimeout> | undefined;
+  private holdState: HoldState = FREE;
+  private resumeAttempt = 0;
   private speedPlayer: SpeedControllableAudioPlayer | undefined;
   private state: PlaybackState = 'idle';
   private isStarted = false;
@@ -386,33 +406,82 @@ export class Transport {
    * slightly late hit dips the volume instead of stopping the song.
    */
   hold(): void {
-    if (!this.audioPlayer || this.state !== 'playing' || this.held) {
+    const player = this.audioPlayer;
+
+    if (!player || this.state !== 'playing') {
       return;
     }
 
-    this.held = true;
+    const hold = this.holdState;
 
-    const player = this.audioPlayer;
+    switch (hold.kind) {
+      case 'free':
+        this.startFadeOut(player, undefined);
 
-    // Still frozen from a release whose resume hasn't finished (and still
-    // silent): freeze again at once.
-    if (!player.fadeTo || this.resuming) {
-      this.freeze();
+        return;
+
+      case 'settling':
+        this.startFadeOut(player, hold.at);
+
+        return;
+
+      case 'fading':
+        return;
+
+      case 'frozen':
+        return;
+
+      case 'resuming':
+        // Still frozen from a release whose resume hasn't finished (and still
+        // silent): freeze again at once. That resume is stale now.
+        this.freeze(hold.at);
+
+        return;
+
+      default:
+        assertNever(hold, 'hold state');
+    }
+  }
+
+  /** `at`: the time still shown from a hold that is settling, if any. */
+  private startFadeOut(player: AudioPlayer, at: number | undefined): void {
+    if (!player.fadeTo) {
+      this.freeze(at);
 
       return;
     }
 
     player.fadeTo(0, HOLD_FADE_SECONDS);
-    this.freezeTimer = setTimeout(() => {
-      this.freezeTimer = undefined;
 
-      if (this.held) {
-        this.freeze();
-      }
-    }, HOLD_FADE_SECONDS * 1000);
+    const timer = setTimeout(
+      () => this.handleFadedOut(timer),
+      HOLD_FADE_SECONDS * 1000,
+    );
+
+    this.holdState = { kind: 'fading', timer, at };
   }
 
-  private freeze(): void {
+  private handleFadedOut(timer: ReturnType<typeof setTimeout>): void {
+    const hold = this.holdState;
+
+    // Released, paused or seeked during the fade: that cleared this hold.
+    if (hold.kind !== 'fading' || hold.timer !== timer) {
+      return;
+    }
+
+    // The song ended during the fade: nothing left to hold.
+    if (this.state !== 'playing') {
+      this.holdState = FREE;
+      this.audioPlayer?.fadeTo?.(1, 0);
+
+      return;
+    }
+
+    this.freeze(hold.at);
+  }
+
+  /** `at`: the time already shown by a hold still settling, if any. */
+  private freeze(at: number | undefined): void {
     if (!this.audioPlayer) {
       return;
     }
@@ -421,89 +490,145 @@ export class Transport {
     const live = this.audioPlayer.currentTime;
     const shown = this.position;
 
-    this.frozenTime ??=
-      live < shown && shown - live < SETTLE_SECONDS ? shown : live;
+    this.holdState = {
+      kind: 'frozen',
+      at: at ?? (live < shown && shown - live < SETTLE_SECONDS ? shown : live),
+    };
     void this.audioPlayer.context.suspend().catch(() => {});
   }
 
   release(): void {
-    if (!this.held) {
-      return;
-    }
-
-    this.held = false;
-
+    const hold = this.holdState;
     const player = this.audioPlayer;
 
-    if (this.freezeTimer !== undefined) {
-      // Hit during the fade: the song never stopped, just bring it back up.
-      clearTimeout(this.freezeTimer);
-      this.freezeTimer = undefined;
-      player?.fadeTo?.(1, HOLD_FADE_SECONDS);
-      this.flushPendingSpeed();
+    switch (hold.kind) {
+      case 'free':
+        return;
 
+      case 'resuming':
+        return;
+
+      case 'settling':
+        return;
+
+      case 'fading':
+        // Hit during the fade: the song never stopped, just bring it back up.
+        clearTimeout(hold.timer);
+        this.holdState =
+          hold.at === undefined ? FREE : { kind: 'settling', at: hold.at };
+        player?.fadeTo?.(1, HOLD_FADE_SECONDS);
+        this.flushPendingSpeed();
+
+        return;
+
+      case 'frozen': {
+        if (!player || this.state !== 'playing') {
+          this.holdState = FREE;
+          player?.fadeTo?.(1, 0);
+
+          return;
+        }
+
+        this.resumeAttempt += 1;
+
+        const attempt = this.resumeAttempt;
+
+        this.holdState = { kind: 'resuming', at: hold.at, attempt };
+        void player.context
+          .resume()
+          .catch(() => {})
+          .then(() => this.handleResumed(attempt));
+
+        return;
+      }
+
+      default:
+        assertNever(hold, 'hold state');
+    }
+  }
+
+  private handleResumed(attempt: number): void {
+    const hold = this.holdState;
+
+    // A new hold, pause or seek came first: this resume is stale.
+    if (hold.kind !== 'resuming' || hold.attempt !== attempt) {
       return;
     }
 
-    if (!player || this.state !== 'playing') {
-      this.frozenTime = undefined;
-      player?.fadeTo?.(1, 0);
-
-      return;
-    }
-
-    this.resuming = true;
-    void player.context
-      .resume()
-      .catch(() => {})
-      .then(() => {
-        this.resuming = false;
-
-        if (!this.held) {
-          this.flushPendingSpeed();
-        }
-
-        // frozenTime stays until the live time catches up with it (see
-        // updatePlaybackPosition), so the song never steps back on release.
-        if (!this.held) {
-          player.fadeTo?.(1, HOLD_FADE_SECONDS);
-        }
-      });
+    // `at` stays until the live time catches up with it (see heldTime), so
+    // the song never steps back on release.
+    this.holdState = { kind: 'settling', at: hold.at };
+    this.flushPendingSpeed();
+    this.audioPlayer?.fadeTo?.(1, HOLD_FADE_SECONDS);
   }
 
   /** Ends a hold for a new start, seek or pause, which set their own time. */
   private clearHold(): void {
-    if (this.freezeTimer !== undefined) {
-      clearTimeout(this.freezeTimer);
-      this.freezeTimer = undefined;
+    const hold = this.holdState;
+
+    this.holdState = FREE;
+
+    switch (hold.kind) {
+      case 'free':
+        return;
+
+      case 'settling':
+        this.audioPlayer?.fadeTo?.(1, 0);
+
+        return;
+
+      case 'fading':
+        clearTimeout(hold.timer);
+        this.unfreezeForRestart();
+
+        return;
+
+      case 'frozen':
+        this.unfreezeForRestart();
+
+        return;
+
+      case 'resuming':
+        this.unfreezeForRestart();
+
+        return;
+
+      default:
+        assertNever(hold, 'hold state');
     }
+  }
 
-    if (this.held || this.frozenTime !== undefined) {
-      this.audioPlayer?.fadeTo?.(1, 0);
-    }
+  /** Full volume, and the speed a hold kept back, for a start, seek or pause. */
+  private unfreezeForRestart(): void {
+    this.audioPlayer?.fadeTo?.(1, 0);
 
-    const wasFrozen = this.isFrozen;
-
-    this.held = false;
-    this.resuming = false;
-    this.frozenTime = undefined;
-
-    if (wasFrozen && this.state !== 'counting-in') {
+    if (this.state !== 'counting-in') {
       this.flushPendingSpeed();
     }
   }
 
   /** Held, or not yet running again after a release. */
   private get isFrozen(): boolean {
-    return this.held || this.resuming;
+    const { kind } = this.holdState;
+
+    return kind === 'fading' || kind === 'frozen' || kind === 'resuming';
   }
 
   get isHeld(): boolean {
-    return this.held;
+    const { kind } = this.holdState;
+
+    return kind === 'fading' || kind === 'frozen';
+  }
+
+  /** The song time a hold is showing in place of the player's, if any. */
+  private get holdTime(): number | undefined {
+    const hold = this.holdState;
+
+    return hold.kind === 'free' ? undefined : hold.at;
   }
 
   pause(): void {
-    const frozen = this.frozenTime;
+    const frozen = this.holdTime;
 
     this.clearHold();
 
@@ -537,7 +662,7 @@ export class Transport {
 
     // Seeking out of a hold (wait mode's run-up): start silent and fade in
     // as the audio starts, instead of cutting in mid-waveform.
-    const fromHold = this.isFrozen || this.frozenTime !== undefined;
+    const fromHold = this.holdState.kind !== 'free';
 
     this.clearHold();
 
@@ -647,7 +772,11 @@ export class Transport {
 
   dispose(): void {
     this.disposed = true;
-    clearTimeout(this.freezeTimer);
+
+    if (this.holdState.kind === 'fading') {
+      clearTimeout(this.holdState.timer);
+    }
+
     this.playGeneration += 1;
     this.clearScheduling();
     this.clickTrack?.dispose();
@@ -773,23 +902,36 @@ export class Transport {
    */
   private heldTime(player: AudioPlayer): number {
     const live = player.currentTime;
-    const frozen = this.frozenTime;
+    const hold = this.holdState;
 
-    if (frozen === undefined) {
-      return live;
+    switch (hold.kind) {
+      case 'free':
+        return live;
+
+      case 'fading':
+        return hold.at ?? live;
+
+      case 'frozen':
+        return hold.at;
+
+      case 'resuming':
+        return hold.at;
+
+      case 'settling':
+        if (
+          player.context.state !== 'running' ||
+          (live < hold.at && hold.at - live < SETTLE_SECONDS)
+        ) {
+          return hold.at;
+        }
+
+        this.holdState = FREE;
+
+        return live;
+
+      default:
+        return assertNever(hold, 'hold state');
     }
-
-    if (this.held || this.resuming || player.context.state !== 'running') {
-      return frozen;
-    }
-
-    if (live < frozen && frozen - live < SETTLE_SECONDS) {
-      return frozen;
-    }
-
-    this.frozenTime = undefined;
-
-    return live;
   }
 
   private scheduleClicks(): void {
