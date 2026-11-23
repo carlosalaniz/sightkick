@@ -6,7 +6,7 @@ import { OutcomeTone } from './outcomeText';
 import { LessonStep } from './steps';
 import { barRangeLabel, LessonWindow } from './windows';
 
-/** Status colors from the mock's dark theme (the app theme has no ok / warn tokens). */
+/** Status colors for ok / warn: the app theme has no tokens for them. */
 export const OK = '#3fae6a';
 
 export const WARN = '#d9a03a';

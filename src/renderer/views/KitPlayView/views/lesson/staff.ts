@@ -1,6 +1,6 @@
 import { TimelineBar, TimelineNote, Voice, VOICE_INFO } from '../../../../kit';
 
-/** Staff drawing space, as in the mock: a 1000 × 284 viewBox, 4 bars of 214. */
+/** Staff drawing space: a 1000 × 284 viewBox, 4 bars of 214. */
 export const STAFF_W = 1000;
 
 export const STAFF_H = 284;
@@ -164,8 +164,9 @@ export function countIndexAt(counts: CountMark[], t: number): number {
 
 /**
  * Geometry for the static staff of one window: noteheads, stems and beams
- * per beat (hands up, kick down, as in the mock), and count syllables.
- * `guide` (0–1) grows the staff the way the mock's help level does.
+ * per beat (hands up, kick down), and count syllables. More `guide` (0–1)
+ * spaces the lines wider and draws bigger noteheads; as the help fades the
+ * staff shrinks to plain notation.
  */
 export function layoutStaff(
   bars: TimelineBar[],

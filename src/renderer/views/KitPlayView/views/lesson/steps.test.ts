@@ -12,7 +12,7 @@ import { Voice } from '../../../../kit';
 const opts = { hasMix: true, hasDrumStem: true };
 
 describe('buildSteps', () => {
-  it('follows the mock for a hi-hat / snare / kick beat', () => {
+  it('builds every step for a hi-hat / snare / kick beat', () => {
     const steps = buildSteps(['kick', 'snare', 'hihat'], opts);
 
     expect(steps.map((s) => s.name)).toEqual([

@@ -17,7 +17,7 @@ import {
   STAFF_X0,
 } from './staff';
 
-/** Colors drawn on the paper staff (the mock's, tuned for paper). */
+/** Colors drawn on the paper staff, darker than the app's to read on paper. */
 export const INK = '#1c1a14';
 
 export const TIER_COLORS = ['#2c8c52', '#b08a14', '#c46a2a'] as const;
@@ -69,7 +69,7 @@ export function markStaffNote(
   }
 }
 
-/** The static 4-bar staff of the mock, with a moving playhead and count. */
+/** The static 4-bar staff, with a moving playhead and count. */
 export function LessonStaff({
   session,
   layout,

@@ -42,8 +42,8 @@ export function tierOf(offsetMs: number): 0 | 1 | 2 {
 }
 
 /**
- * Misses a clean pass may have. The mock allows 1 in ~50 notes; real charts
- * can be much denser, so it scales: 1 per 50 notes, at least 1.
+ * Misses a clean pass may have. A fixed count would be strict on dense
+ * charts and lax on sparse ones, so it scales: 1 per 50 notes, at least 1.
  */
 export function allowedMisses(total: number): number {
   return Math.max(1, Math.round(total / 50));
@@ -147,7 +147,7 @@ export function startLesson(
   };
 }
 
-/** Jumping to a step by hand, as the mock's step buttons do. */
+/** Jumping to a step by hand (the step bar): read help starts over, no rough streak. */
 export function jumpToStep(state: LessonState, step: number): LessonState {
   return { ...state, step, readGuide: READ_GUIDE_START, rough: 0 };
 }

@@ -58,7 +58,7 @@ const close = scorePass([...notes(15, 5), ...notes(25, 50)], 4);
 const rough = scorePass([...notes(10, 5), ...notes(30, undefined)], 4);
 
 describe('scorePass', () => {
-  it('weights hits by timing tier like the mock', () => {
+  it('weights hits by timing tier', () => {
     expect(tierOf(-35)).toBe(0);
     expect(tierOf(36)).toBe(1);
     expect(tierOf(-71)).toBe(2);

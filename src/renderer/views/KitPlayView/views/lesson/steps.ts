@@ -42,7 +42,7 @@ const sameSet = (a: Voice[], b: Voice[]) =>
 
 /**
  * The lesson's steps for the voices in its window: listen, count, one limb
- * group at a time (cymbal hand + foot, then both hands, as in the mock),
+ * group at a time (cymbal hand + foot, then both hands),
  * all together, read, mix-up. Limb steps that would be empty, repeat one
  * before or already be the whole beat are skipped.
  */

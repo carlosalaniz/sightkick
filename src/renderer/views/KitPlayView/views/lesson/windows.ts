@@ -1,6 +1,6 @@
 import { TimelineBar, TimelineNote } from '../../../../kit';
 
-/** Bars per lesson window, like the mock's 4-bar staff. */
+/** Bars per lesson window: the staff (staff.ts) is laid out for 4 bars. */
 export const LESSON_BARS = 4;
 
 /** One lesson: a window of bars of the real song, looped while you learn it. */
