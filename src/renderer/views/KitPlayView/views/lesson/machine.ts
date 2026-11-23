@@ -174,8 +174,11 @@ export interface PassOutcome {
   state: LessonState;
   message: string;
   ok: boolean;
-  /** Set when the lesson was read: the lesson index and whether a star was earned. */
-  finished?: { lesson: number; star: boolean };
+  /**
+   * Set when the lesson was read: the lesson index, whether a star was
+   * earned, and whether one was withheld only because `starAllowed` was false.
+   */
+  finished?: { lesson: number; star: boolean; withheld: boolean };
 }
 
 export interface PassContext {
@@ -188,6 +191,11 @@ export interface PassContext {
   stepsFor: (lesson: number) => Pick<LessonStep, 'kind'>[];
   /** Lessons seen before (read at least once). */
   seen: boolean[];
+  /**
+   * Whether this pass may earn a star. False when the song had to wait for
+   * the player: a pass it waited in says nothing about timing.
+   */
+  starAllowed: boolean;
 }
 
 const pctSpeed = (speed: number) => `${Math.round(speed * 100)}%`;
@@ -229,7 +237,8 @@ export function endPass(
   const finish = (): PassOutcome => {
     const lesson = state.lesson;
     const stars = ctx.stars[lesson] ?? 0;
-    const star = state.speed >= state.baseSpeed - 1e-6 && stars < MAX_STARS;
+    const earned = state.speed >= state.baseSpeed - 1e-6 && stars < MAX_STARS;
+    const star = earned && ctx.starAllowed;
     const after = ctx.stars.map((s, i) => (i === lesson && star ? s + 1 : s));
     const nextIdx = nextLesson(after, lesson);
     const seen = ctx.seen.map((s, i) => s || i === lesson);
@@ -246,7 +255,7 @@ export function endPass(
         state.speed,
       )} speed. Next: ${ctx.names[nextIdx]} at ${pctSpeed(next.speed)}.`,
       ok: true,
-      finished: { lesson, star },
+      finished: { lesson, star, withheld: earned && !star },
     };
   };
 

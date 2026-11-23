@@ -414,29 +414,22 @@ export function LessonView({ session }: { session: PlaySession }) {
             })),
             win.endBar - win.startBar,
           );
+    const passWaits = waitMode ? waits.current.pass : 0;
     const outcome = endPass(state, passResult, {
       steps,
       stars,
       seen,
       names: lessons.map((l) => l.name),
       stepsFor: (i) => allSteps[i] ?? [],
+      starAllowed: passWaits === 0,
     });
-    // A pass the song had to wait in says nothing about timing, so it earns
-    // no star; one it never waited in was played in time and counts.
-    const passWaits = waits.current.pass;
 
     if (waitMode && passResult) {
-      if (passWaits > 0 && outcome.finished?.star) {
-        outcome.finished = { ...outcome.finished, star: false };
-        outcome.message = `${outcome.message.replace(/^★ /, '')} (${plural(
-          passWaits,
-          'wait',
-        )}: no star)`;
-      } else {
-        outcome.message = `${outcome.message} · ${
-          passWaits > 0 ? plural(passWaits, 'wait') : 'no waits'
-        }`;
-      }
+      const waited = passWaits > 0 ? plural(passWaits, 'wait') : 'no waits';
+
+      outcome.message = outcome.finished?.withheld
+        ? `${outcome.message} (${waited}: no star)`
+        : `${outcome.message} · ${waited}`;
     }
 
     setState(outcome.state);

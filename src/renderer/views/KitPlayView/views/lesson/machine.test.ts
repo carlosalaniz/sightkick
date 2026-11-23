@@ -30,6 +30,7 @@ function ctx(over: Partial<PassContext> = {}): PassContext {
     seen: [false, false, false],
     names: ['Intro', 'Verse', 'Chorus'],
     stepsFor: () => steps,
+    starAllowed: true,
     ...over,
   };
 }
@@ -191,13 +192,13 @@ describe('endPass', () => {
       ctx({ steps: noMix, stepsFor: () => noMix }),
     );
 
-    expect(r.finished).toEqual({ lesson: 0, star: true });
+    expect(r.finished).toEqual({ lesson: 0, star: true, withheld: false });
   });
 
   it('earns a star on a clean mix-up at the base speed and moves on', () => {
     const r = endPass(state({ step: idx('mix'), readGuide: 0 }), clean, ctx());
 
-    expect(r.finished).toEqual({ lesson: 0, star: true });
+    expect(r.finished).toEqual({ lesson: 0, star: true, withheld: false });
     expect(r.state).toMatchObject({ lesson: 1, step: 0, speed: 0.8 });
     expect(r.message).toBe('★ Intro read at 80% speed. Next: Verse at 80%.');
   });
@@ -209,9 +210,27 @@ describe('endPass', () => {
       ctx(),
     );
 
-    expect(r.finished).toEqual({ lesson: 0, star: false });
+    expect(r.finished).toEqual({ lesson: 0, star: false, withheld: false });
     expect(r.message.startsWith('★')).toBe(false);
     // Still the lowest-star lesson, so it comes straight back, now at the read step.
+    expect(r.state).toMatchObject({ lesson: 0, step: idx('read'), speed: 0.8 });
+  });
+
+  it('withholds the star when the pass may not earn one, and picks the next lesson from that', () => {
+    // Stars [0, 0]: with the star, lesson 1 would have the fewest and be next.
+    const r = endPass(
+      state({ step: idx('mix'), readGuide: 0 }),
+      clean,
+      ctx({
+        stars: [0, 0],
+        seen: [false, false],
+        names: ['Intro', 'Verse'],
+        starAllowed: false,
+      }),
+    );
+
+    expect(r.finished).toEqual({ lesson: 0, star: false, withheld: true });
+    expect(r.message).toBe('Intro read at 80% speed. Next: Intro at 80%.');
     expect(r.state).toMatchObject({ lesson: 0, step: idx('read'), speed: 0.8 });
   });
 
