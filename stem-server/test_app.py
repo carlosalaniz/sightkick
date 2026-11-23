@@ -1,4 +1,4 @@
-"""Tests for the job queue and split cache, with the models stubbed out.
+"""Tests for the job queue and split cache, with the separation library faked.
 
 Needs ffmpeg plus: pip install fastapi python-multipart httpx numpy soundfile pytest
 Run from stem-server/: python -m pytest test_app.py
@@ -8,10 +8,13 @@ import hashlib
 import io
 import json
 import os
+import queue
 import subprocess
+import sys
 import tempfile
 import threading
 import time
+import types
 from pathlib import Path
 
 import numpy as np
@@ -33,49 +36,105 @@ def wav_bytes(freq: float) -> bytes:
     return buf.getvalue()
 
 
-class StubSeparator:
-    """Stands in for separate(): writes a drums and a bass stem and counts runs.
-    Set `gate` to hold a run until the test releases it."""
+class FakeAudioSeparator:
+    """Stands in for the python-audio-separator package at its import path, so
+    our adapter (get_separator, separate, the progress hooks, stem naming) runs
+    for real on top of it.
+
+    Like the library, its Separator writes one WAV per stem into the model's
+    output_dir: "<input>_(<Stem>)_<model>.wav" for Demucs, or the custom names
+    it's given for models whose config lists their instruments (RoFormer,
+    MDX23C). Its chunk loop goes through the module-level tqdm that
+    install_progress_hooks replaces.
+
+    Knobs: `stems` (what the instrument model finds), `kit_pieces`, `gate`
+    (hold every chunk until the test sets it), `fail` (raise from a run),
+    `broken` (model files whose load_model raises)."""
 
     def __init__(self):
         self.runs = 0
+        self.loads: list[str] = []
+        self.stems = ["Drums", "Bass"]
+        self.kit_pieces = ["kick", "snare"]
         self.gate: threading.Event | None = None
-        self.names = ["drums", "bass"]
+        self.fail: Exception | None = None
+        self.broken: set[str] = set()
+        self.chunks_started = threading.Event()
 
-    def __call__(self, job, key, wav, out_dir, span):
-        if self.gate:
-            self.gate.wait(5)
-        self.runs += 1
-        out_dir.mkdir()
-        data, rate = sf.read(str(wav))
-        names = ["kick", "snare"] if key == "kit" else self.names
-        paths = []
-        for i, name in enumerate(names):
-            path = out_dir / f"{name}.wav"
-            # A different pitch per stem, so a mix differs from any one stem.
-            tone = 0.1 * np.sin(np.arange(len(data)) * (i + 1) / 20)
-            sf.write(str(path), data * 0.5 + (tone[:, None] if data.ndim == 2 else tone), rate)
-            paths.append(path)
-        return paths
+        lib = self
+        tqdm_module = types.ModuleType("tqdm")
+        tqdm_module.tqdm = lambda iterable=None, *a, **k: iterable
 
+        class Separator:
+            def __init__(self, **kwargs):
+                self.output_dir = kwargs["output_dir"]
+                self.model_instance = None
 
-@pytest.fixture
-def stub(monkeypatch):
-    sep = StubSeparator()
-    monkeypatch.setattr(app, "separate", sep)
-    monkeypatch.setattr(app, "get_separator", lambda quality: None)
-    real_run = app.run
+            def load_model(self, model_filename):
+                lib.loads.append(model_filename)
+                if model_filename in lib.broken:
+                    raise RuntimeError(f"LIBRARY-TEXT: no such file /models/{model_filename}")
+                self.model_name = Path(model_filename).stem
+                self.model_instance = types.SimpleNamespace(output_dir=self.output_dir)
+                if model_filename == app.KIT_MODEL:
+                    names = lib.kit_pieces
+                elif model_filename.endswith(".yaml"):
+                    names = None  # Demucs: no config with instrument names
+                else:
+                    names = lib.stems
+                if names is not None:
+                    self.model_instance.model_data_cfgdict = types.SimpleNamespace(
+                        training=types.SimpleNamespace(instruments=list(names))
+                    )
 
-    def run(cmd):
-        # Some ffmpeg builds (e.g. Homebrew's) lack libvorbis; fall back to
-        # ffmpeg's own experimental Vorbis encoder for the tests.
-        if "libvorbis" in cmd and not HAS_LIBVORBIS:
-            i = cmd.index("libvorbis")
-            cmd = cmd[:i] + ["vorbis", "-strict", "-2", "-ac", "2"] + cmd[i + 1:]
-        real_run(cmd)
+            def separate(self, audio_file_path, custom_output_names=None):
+                lib.runs += 1
+                data, rate = sf.read(audio_file_path)
+                if custom_output_names:
+                    tqdm = lib.modules["audio_separator.separator.architectures.mdxc_separator"].tqdm
+                    outputs = [custom_output_names[n] for n in custom_output_names]
+                else:
+                    tqdm = lib.modules["audio_separator.separator.uvr_lib_v5.demucs.apply"].tqdm.tqdm
+                    base = Path(audio_file_path).stem
+                    outputs = [f"{base}_({n})_{self.model_name}" for n in lib.stems]
+                for _ in tqdm(range(4)):
+                    lib.chunks_started.set()
+                    if lib.gate:
+                        lib.gate.wait(5)
+                    if lib.fail:
+                        raise lib.fail
+                paths = []
+                for i, name in enumerate(outputs):
+                    path = Path(self.model_instance.output_dir) / f"{name}.wav"
+                    # A different pitch per stem, so a mix differs from any one stem.
+                    tone = 0.1 * np.sin(np.arange(len(data)) * (i + 1) / 20)
+                    sf.write(str(path), data * 0.5 + (tone[:, None] if data.ndim == 2 else tone), rate)
+                    paths.append(str(path))
+                return paths
 
-    monkeypatch.setattr(app, "run", run)
-    return sep
+        def module(name, **attrs):
+            mod = types.ModuleType(name)
+            for key, value in attrs.items():
+                setattr(mod, key, value)
+            return mod
+
+        mdxc = module("audio_separator.separator.architectures.mdxc_separator", tqdm=tqdm_module.tqdm)
+        demucs_apply = module("audio_separator.separator.uvr_lib_v5.demucs.apply", tqdm=tqdm_module)
+        demucs = module("audio_separator.separator.uvr_lib_v5.demucs", apply=demucs_apply)
+        uvr = module("audio_separator.separator.uvr_lib_v5", demucs=demucs)
+        architectures = module("audio_separator.separator.architectures", mdxc_separator=mdxc)
+        separator = module(
+            "audio_separator.separator", Separator=Separator, architectures=architectures, uvr_lib_v5=uvr
+        )
+        self.modules = {
+            "audio_separator": module("audio_separator", separator=separator),
+            "audio_separator.separator": separator,
+            "audio_separator.separator.architectures": architectures,
+            "audio_separator.separator.architectures.mdxc_separator": mdxc,
+            "audio_separator.separator.uvr_lib_v5": uvr,
+            "audio_separator.separator.uvr_lib_v5.demucs": demucs,
+            "audio_separator.separator.uvr_lib_v5.demucs.apply": demucs_apply,
+        }
 
 
 HAS_LIBVORBIS = "libvorbis" in subprocess.run(
@@ -84,9 +143,40 @@ HAS_LIBVORBIS = "libvorbis" in subprocess.run(
 
 
 @pytest.fixture
-def client(stub):
+def lib(monkeypatch):
+    fake = FakeAudioSeparator()
+    for name, module in fake.modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    # Each test starts from a fresh server: no loaded models, jobs or queue.
+    monkeypatch.setattr(app, "separators", {})
+    monkeypatch.setattr(app, "model_states", {k: {"status": "not loaded", "error": None} for k in app.MODELS})
+    monkeypatch.setattr(app, "jobs", {})
+    monkeypatch.setattr(app, "inflight", {})
+    monkeypatch.setattr(app, "pending", queue.Queue())
+
+    real_run = app.run
+
+    def run(cmd, **kwargs):
+        # Some ffmpeg builds (e.g. Homebrew's) lack libvorbis; fall back to
+        # ffmpeg's own experimental Vorbis encoder for the tests.
+        if "libvorbis" in cmd and not HAS_LIBVORBIS:
+            i = cmd.index("libvorbis")
+            cmd = cmd[:i] + ["vorbis", "-strict", "-2", "-ac", "2"] + cmd[i + 1:]
+        real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(app, "run", run)
+    return fake
+
+
+@pytest.fixture
+def client(lib):
+    # Leaving the block runs the app's shutdown, which stops its threads.
     with TestClient(app.app) as c:
         yield c
+        if lib.gate:
+            lib.gate.set()  # let a held model pass finish so the worker can exit
+    alive = [t.name for t in threading.enumerate() if t.name in ("separator", "janitor")]
+    assert not alive, f"threads left running: {alive}"
 
 
 def post(client, audio: bytes, mode: str = "stems") -> dict:
@@ -108,7 +198,7 @@ def wait_done(client, job_id: str) -> dict:
     raise AssertionError("job never finished")
 
 
-def test_second_request_for_same_audio_is_served_from_cache(client, stub):
+def test_second_request_for_same_audio_is_served_from_cache(client, lib):
     audio = wav_bytes(220)
     first = wait_done(client, post(client, audio)["id"])
     assert first["status"] == "done"
@@ -119,14 +209,14 @@ def test_second_request_for_same_audio_is_served_from_cache(client, stub):
     assert second["status"] == "done"
     assert second["cached"] is True
     assert second["stems"] == ["bass", "drums"]
-    assert stub.runs == 1
+    assert lib.runs == 1
 
     a = client.get(f"/jobs/{first['id']}/stems/drums").content
     b = client.get(f"/jobs/{second['id']}/stems/drums").content
     assert a == b and len(a) > 0
 
 
-def test_deleting_a_job_keeps_its_cache_entry(client, stub):
+def test_deleting_a_job_keeps_its_cache_entry(client, lib):
     audio = wav_bytes(330)
     job = wait_done(client, post(client, audio)["id"])
     client.delete(f"/jobs/{job['id']}")
@@ -136,7 +226,7 @@ def test_deleting_a_job_keeps_its_cache_entry(client, stub):
     assert client.get(f"/jobs/{again['id']}/stems/bass").status_code == 200
 
 
-def test_mode_and_audio_are_part_of_the_key(client, stub):
+def test_mode_and_audio_are_part_of_the_key(client, lib):
     audio = wav_bytes(440)
     wait_done(client, post(client, audio)["id"])
     kit = post(client, audio, mode="kit")
@@ -146,11 +236,11 @@ def test_mode_and_audio_are_part_of_the_key(client, stub):
     other = post(client, wav_bytes(441))
     assert other["cached"] is False
     wait_done(client, other["id"])
-    assert stub.runs == 3
+    assert lib.runs == 3
 
 
-def test_same_audio_while_splitting_joins_the_running_job(client, stub):
-    stub.gate = threading.Event()
+def test_same_audio_while_splitting_joins_the_running_job(client, lib):
+    lib.gate = threading.Event()
     audio = wav_bytes(550)
     first = post(client, audio)
     second = post(client, audio)
@@ -158,13 +248,13 @@ def test_same_audio_while_splitting_joins_the_running_job(client, stub):
 
     # One client cancelling must not cancel the job for the other.
     client.delete(f"/jobs/{first['id']}")
-    stub.gate.set()
+    lib.gate.set()
     job = wait_done(client, second["id"])
     assert job["status"] == "done"
-    assert stub.runs == 1
+    assert lib.runs == 1
 
 
-def test_incomplete_cache_entry_is_a_miss(client, stub):
+def test_incomplete_cache_entry_is_a_miss(client, lib):
     audio = wav_bytes(660)
     wait_done(client, post(client, audio)["id"])
     for path in Path(os.environ["SK_CACHE_DIR"]).glob("*/*/drums.ogg"):
@@ -173,11 +263,11 @@ def test_incomplete_cache_entry_is_a_miss(client, stub):
     again = post(client, audio)
     assert again["cached"] is False
     assert wait_done(client, again["id"])["status"] == "done"
-    assert stub.runs == 2
+    assert lib.runs == 2
 
 
-def test_instrument_stems_also_come_mixed_into_a_backing_track(client, stub):
-    stub.names = ["drums", "bass", "vocals", "other"]
+def test_instrument_stems_also_come_mixed_into_a_backing_track(client, lib):
+    lib.stems = ["Drums", "Bass", "Vocals", "Other"]
     job = wait_done(client, post(client, wav_bytes(770))["id"])
     assert job["stems"] == ["backing", "bass", "drums", "song", "vocals"]
     backing = client.get(f"/jobs/{job['id']}/stems/backing").content
@@ -189,15 +279,15 @@ def test_instrument_stems_also_come_mixed_into_a_backing_track(client, stub):
     assert "backing" in again["stems"]
 
 
-def test_a_single_instrument_or_a_kit_split_gets_no_backing(client, stub):
+def test_a_single_instrument_or_a_kit_split_gets_no_backing(client, lib):
     job = wait_done(client, post(client, wav_bytes(880))["id"])
     assert "backing" not in job["stems"]
     kit = wait_done(client, post(client, wav_bytes(880), mode="kit")["id"])
     assert "backing" not in kit["stems"]
 
 
-def test_old_cache_entries_gain_a_backing_track_without_splitting_again(client, stub):
-    stub.names = ["drums", "bass", "vocals"]
+def test_old_cache_entries_gain_a_backing_track_without_splitting_again(client, lib):
+    lib.stems = ["Drums", "Bass", "Vocals"]
     audio = wav_bytes(990)
     wait_done(client, post(client, audio)["id"])
     # Turn the entry into one stored before splits made a backing mix.
@@ -211,6 +301,6 @@ def test_old_cache_entries_gain_a_backing_track_without_splitting_again(client, 
     again = post(client, audio)
     assert again["cached"] is True
     assert "backing" in again["stems"]
-    assert stub.runs == 1
+    assert lib.runs == 1
     assert "backing" in json.loads(manifest_path.read_text())["stems"]
     assert client.get(f"/jobs/{again['id']}/stems/backing").status_code == 200

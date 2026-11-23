@@ -91,7 +91,7 @@ Jobs run one at a time. A `POST /jobs` that hits the cache comes back with `stat
 
 ## Tests
 
-The job queue and cache have tests that stub out the models (needs ffmpeg):
+The job queue, cache and error outcomes have tests that fake the separation library at its import path (so the server's own model code still runs) and use the real ffmpeg:
 
 ```bash
 cd stem-server
