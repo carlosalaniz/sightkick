@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePersisted } from '../../../../hooks/usePersisted';
 import { firstNoteAtOrAfter, KitPiece, TimelineNote } from '../../../../kit';
-import { useAnimationFrame, useNoteJudgments } from '../../hooks';
+import { useAnimationFrame, useNoteJudgments, useToast } from '../../hooks';
 import { PlaySession } from '../../session';
 import {
   beatSecondsAt,
@@ -44,6 +44,9 @@ export type NoteSpeedId = (typeof NOTE_SPEEDS)[number]['id'];
 /** Click volume when the Click box is on. */
 export const CLICK_ON = 0.6;
 
+/** How long the pass and Fever toasts stay up. */
+const TOAST_MS = 3000;
+
 /** Song speed a section's Practice button loops it at. */
 export const PRACTICE_SPEED = 0.7;
 
@@ -60,12 +63,6 @@ export interface ArcadeFx {
   onMiss?: (note: TimelineNote, piece: KitPiece) => void;
   /** The run was reset (restart, new loop, loop pass). */
   onReset?: () => void;
-}
-
-export interface ArcadeToast {
-  id: number;
-  message: string;
-  ok: boolean;
 }
 
 /**
@@ -111,20 +108,11 @@ export function useArcade(
     'normal',
   );
   const [results, setResults] = useState<ArcadeResults | undefined>();
-  const [toast, setToast] = useState<ArcadeToast | undefined>();
-  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [toast, showToast] = useToast(TOAST_MS);
 
   useEffect(() => {
     fxRef.current = fx;
   });
-
-  const showToast = (message: string, ok: boolean) => {
-    clearTimeout(toastTimer.current);
-    setToast({ id: Date.now(), message, ok });
-    toastTimer.current = setTimeout(() => setToast(undefined), 3000);
-  };
-
-  useEffect(() => () => clearTimeout(toastTimer.current), []);
 
   const reset = () => {
     log.clear();

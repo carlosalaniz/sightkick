@@ -1,4 +1,4 @@
-import { RefObject, useCallback, useEffect, useRef } from 'react';
+import { RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { inputBus } from '../../input';
 import {
   firstNoteAtOrAfter,
@@ -29,6 +29,37 @@ export function useMirror<T>(
   );
 
   return [ref, set];
+}
+
+/** A short status message over a play view; `ok` colors it green. */
+export interface Toast {
+  /** Changes with every new message, so the same text shows again. */
+  id: number;
+  message: string;
+  ok: boolean;
+}
+
+/**
+ * The toast on screen and a function that shows a new one, replacing the
+ * last, for `durationMs`. The timer is cleared on unmount.
+ */
+export function useToast(
+  durationMs: number,
+): readonly [Toast | undefined, (message: string, ok: boolean) => void] {
+  const [toast, setToast] = useState<Toast | undefined>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const show = useCallback(
+    (message: string, ok: boolean) => {
+      clearTimeout(timer.current);
+      setToast({ id: Date.now(), message, ok });
+      timer.current = setTimeout(() => setToast(undefined), durationMs);
+    },
+    [durationMs],
+  );
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return [toast, show];
 }
 
 /** Runs `callback(now)` every animation frame with the current audio time. */
