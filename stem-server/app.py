@@ -230,7 +230,8 @@ class Job:
     # True when the stems came from the cache rather than this job's own run.
     cached: bool = False
     # Clients following this job. A second request for the same audio joins
-    # the job; it's only cancelled or dropped once every client has let go.
+    # the job, and a DELETE only cancels it once every client has let go.
+    # Finished jobs still expire after JOB_TTL_SECONDS however many follow them.
     watchers: int = 1
     # Share of the progress bar the running model pass reports into.
     span: tuple[float, float] = (5.0, 90.0)

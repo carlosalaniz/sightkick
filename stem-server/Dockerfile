@@ -1,4 +1,5 @@
-# SightKick stem server: splits songs into stems with BS-RoFormer-SW.
+# SightKick stem server: splits songs into stems (HTDemucs by default, BS-RoFormer-SW
+# for the Best preset) and drum tracks into kit pieces (MDX23C DrumSep).
 
 # --- build: compile/install Python deps into a venv -------------------------
 FROM python:3.12-slim AS build
@@ -34,7 +35,9 @@ ENV PATH=/opt/venv/bin:$PATH \
 WORKDIR /app
 COPY app.py .
 
-# The ~700 MB model is downloaded here on first start; mount a volume to keep it.
+# Models download here: the default preset's on first start (HTDemucs, ~80 MB),
+# the others the first time they're used (Best ~700 MB, drum kit ~440 MB).
+# Mount a volume to keep them.
 VOLUME /models
 # Finished splits, kept forever; mount a volume so they survive the container.
 VOLUME /cache
