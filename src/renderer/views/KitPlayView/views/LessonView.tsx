@@ -129,6 +129,24 @@ interface Toast {
 
 const voicesOf = (notes: TimelineNote[]) => new Set(notes.map((n) => n.voice));
 const NO_VOICES: readonly Voice[] = [];
+/** Help level (guide) from which the kit's hints show in full; below, they fade. */
+const FULL_HINTS_AT_GUIDE = 0.5;
+/** Beat length to look ahead by when the window has no bars to measure, s. */
+const FALLBACK_BEAT_SECONDS = 0.5;
+/** How long a pass's message stays up, ms. */
+const TOAST_MS = 3200;
+/**
+ * Least time before the loop wraps, s, in which an early hit on the window's
+ * first notes counts for the next pass (or twice the hit tolerance, if more).
+ */
+const MIN_NEXT_PASS_SLACK_SECONDS = 0.15;
+/**
+ * A hit judged on a note this far ahead of the song, s, can only be a late
+ * hit on the last notes judged after the loop wrapped.
+ */
+const STALE_HIT_SECONDS = 1;
+/** Playback this far outside the window, s, isn't part of the pass. */
+const PASS_TRACK_MARGIN_SECONDS = 0.5;
 
 export function LessonView({ session }: { session: PlaySession }) {
   const { engine, bars, notes, pieceByVoice, timeStore, setPlaybackSpeed } =
@@ -253,7 +271,9 @@ export function LessonView({ session }: { session: PlaySession }) {
     [playable, mine],
   );
   const guide = step ? guideLevel(step, state.readGuide) : 1;
-  const hints = listening ? 1 : Math.max(0, Math.min(1, guide / 0.5));
+  const hints = listening
+    ? 1
+    : Math.max(0, Math.min(1, guide / FULL_HINTS_AT_GUIDE));
   const layout = useMemo(
     () => layoutStaff(winBars, winNotes, guide),
     [winBars, winNotes, guide],
@@ -271,7 +291,7 @@ export function LessonView({ session }: { session: PlaySession }) {
   );
   const lookahead = winBars[0]
     ? (winBars[0].end - winBars[0].start) / Math.max(1, winBars[0].beats.length)
-    : 0.5;
+    : FALLBACK_BEAT_SECONDS;
   const startTick = span?.startTick;
   const endTick = span?.endTick;
   const stemGain = drumTrackGain(kind);
@@ -333,7 +353,7 @@ export function LessonView({ session }: { session: PlaySession }) {
       return undefined;
     }
 
-    const hide = setTimeout(() => setToastShown(false), 3200);
+    const hide = setTimeout(() => setToastShown(false), TOAST_MS);
 
     return () => clearTimeout(hide);
   }, [toast]);
@@ -532,12 +552,15 @@ export function LessonView({ session }: { session: PlaySession }) {
       const t = tracker.current;
       const ms = offsetSeconds * 1000;
       const now = timeStore.get();
-      const slack = Math.max(0.15, engine.hitTolerance * 2);
+      const slack = Math.max(
+        MIN_NEXT_PASS_SLACK_SECONDS,
+        engine.hitTolerance * 2,
+      );
       const next = belongsToNextPass(note.time, now, span, slack);
 
       // A late hit on the last notes, judged after the loop wrapped: it
       // belonged to the pass that was just scored.
-      if (!next && note.time - now > 1) {
+      if (!next && note.time - now > STALE_HIT_SECONDS) {
         return;
       }
 
@@ -654,8 +677,8 @@ export function LessonView({ session }: { session: PlaySession }) {
     if (
       !session.isPlaying ||
       !span ||
-      now < span.start - 0.5 ||
-      now > span.end + 0.5
+      now < span.start - PASS_TRACK_MARGIN_SECONDS ||
+      now > span.end + PASS_TRACK_MARGIN_SECONDS
     ) {
       return;
     }

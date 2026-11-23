@@ -464,6 +464,12 @@ function roughPass(
 }
 
 /**
+ * How near the window's start and end playback must have been, s, for a wrap
+ * to end a full pass: frames don't land exactly on either edge.
+ */
+export const PASS_EDGE_SLACK_SECONDS = 0.3;
+
+/**
  * Whether a loop wrap ended a full pass (rather than a restart or seek):
  * playback started near the window start and reached its end.
  */
@@ -471,7 +477,7 @@ export function isPassComplete(
   minTime: number,
   maxTime: number,
   window: { start: number; end: number },
-  slack = 0.3,
+  slack = PASS_EDGE_SLACK_SECONDS,
 ): boolean {
   return minTime <= window.start + slack && maxTime >= window.end - slack;
 }
