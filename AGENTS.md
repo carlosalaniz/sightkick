@@ -14,9 +14,9 @@ Follow the coding rules in https://github.com/carlosalaniz/coding-standards/blob
 | Lint | `yarn lint` |
 | Typecheck | `yarn tsc --noEmit` |
 | Tests | `yarn test` |
-| Stem server tests | `cd stem-server && pip install fastapi python-multipart httpx numpy soundfile pytest && python -m pytest test_app.py` (needs ffmpeg; the models are stubbed) |
+| Stem server tests | `cd stem-server && pip install -r requirements-test.txt && python -m pytest -q test_app.py` (needs ffmpeg; the separation library is faked) |
 
-**Done** means `yarn lint && yarn tsc --noEmit && yarn test` passes, plus the stem server tests when `stem-server/` changed. CI runs the TypeScript checks.
+**Done** means `yarn lint && yarn tsc --noEmit && yarn test` passes, plus the stem server tests when `stem-server/` changed. CI runs both (`ci.yml`, `stem-server.yml`).
 
 ## Where things live
 
