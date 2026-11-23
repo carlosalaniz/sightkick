@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TimelineBar, TimelineNote, Voice } from '../../../../kit';
 import {
-  barAtTick,
+  barIndexAtTickOrLast,
   buildLoopModel,
   defaultRange,
   loopBarAtBeat,
@@ -108,10 +108,10 @@ describe('loop ranges', () => {
 
     expect(sectionRanges(sections, bars)).toEqual([
       { name: 'Intro', start: 0, end: 4 },
-      { name: 'dup', start: 4, end: 9 },
+      { name: 'Dup', start: 4, end: 9 },
       { name: 'Outro', start: 9, end: 12 },
     ]);
-    expect(barAtTick(bars, 1e9)).toBe(11);
+    expect(barIndexAtTickOrLast(bars, 1e9)).toBe(11);
   });
 
   it('labels ranges 1-based', () => {

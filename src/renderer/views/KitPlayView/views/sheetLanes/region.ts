@@ -1,4 +1,5 @@
 import { TimelineBar, TimelineNote } from '../../../../kit';
+import { barRangeLabel, prettySectionName } from '../shared/sections';
 
 /** Bars per practice window (the mock's 4-bar groove). */
 export const WINDOW_BARS = 4;
@@ -100,8 +101,14 @@ export function nextRangeWithNotes(
     : undefined;
 }
 
-/** Index of the bar containing `tick` (the last bar if past the end). */
-export function barAtTick(bars: TimelineBar[], tick: number): number {
+/**
+ * Index of the bar containing `tick`, or of the last bar when `tick` is past
+ * the end (a section marker after the last bar still gets a bar).
+ */
+export function barIndexAtTickOrLast(
+  bars: TimelineBar[],
+  tick: number,
+): number {
   const i = bars.findIndex((b) => tick < b.endTick);
 
   return i < 0 ? bars.length - 1 : i;
@@ -124,12 +131,12 @@ export function sectionRanges(
   const out: SectionRange[] = [];
 
   sorted.forEach((s, i) => {
-    const start = barAtTick(bars, s.tick);
+    const start = barIndexAtTickOrLast(bars, s.tick);
     const next = sorted[i + 1];
-    const end = next ? barAtTick(bars, next.tick) : bars.length;
+    const end = next ? barIndexAtTickOrLast(bars, next.tick) : bars.length;
 
     if (end > start) {
-      out.push({ name: s.name.replace(/_/g, ' '), start, end });
+      out.push({ name: prettySectionName(s.name), start, end });
     }
   });
 
@@ -258,7 +265,5 @@ export function loopBarAtBeat(model: LoopModel, beat: number): number {
 
 /** `Bars 5–8` (1-based, inclusive). */
 export function rangeLabel(range: BarRange): string {
-  return range.end - range.start <= 1
-    ? `Bar ${range.start + 1}`
-    : `Bars ${range.start + 1}–${range.end}`;
+  return barRangeLabel(range.start, range.end);
 }

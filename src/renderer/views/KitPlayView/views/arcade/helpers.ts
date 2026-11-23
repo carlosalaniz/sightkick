@@ -12,6 +12,7 @@ import {
   VOICE_INFO,
   VOICES,
 } from '../../../../kit';
+import { barRangeLabel, prettySectionName } from '../shared/sections';
 import { clamp } from '../shared/stats';
 
 /** A stretch of the song the player can loop. Ends where the next one starts. */
@@ -26,17 +27,6 @@ export interface SongSection {
 
 /** Bars per chunk when a chart has no section markers. */
 export const CHUNK_BARS = 8;
-
-/** `verse_1` → `Verse 1`, `prc_chorus_a` → `Chorus a`. */
-export function prettySectionName(raw: string): string {
-  const name = raw
-    .replace(/^(prc|section)[_ ]/i, '')
-    .replace(/_/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return name ? name[0].toUpperCase() + name.slice(1) : 'Section';
-}
 
 type SectionChart = Pick<ParsedChart, 'sections' | 'resolution' | 'tempos'>;
 
@@ -70,7 +60,7 @@ export function buildSections(
       const b = bars[Math.min(bars.length, i + CHUNK_BARS) - 1];
 
       out.push({
-        name: `Bars ${i + 1}–${Math.min(bars.length, i + CHUNK_BARS)}`,
+        name: barRangeLabel(i, Math.min(bars.length, i + CHUNK_BARS)),
         startTick: a.startTick,
         endTick: b.endTick,
         start: a.start,

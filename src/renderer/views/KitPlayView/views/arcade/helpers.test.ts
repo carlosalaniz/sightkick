@@ -18,7 +18,6 @@ import {
   maxNotesInWindow,
   padKeyLabel,
   poolSizes,
-  prettySectionName,
   sectionIndexAt,
   skippedLine,
   skippedVoices,
@@ -30,6 +29,7 @@ import {
   laneGemOpacity,
   MISSED_LANE_GEM_OPACITY,
 } from './helpers';
+import { prettySectionName } from '../shared/sections';
 import { pageStartFor } from './SheetStrip';
 
 const RES = 480;
