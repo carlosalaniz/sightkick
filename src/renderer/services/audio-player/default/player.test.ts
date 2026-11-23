@@ -227,4 +227,34 @@ describe('AudioPlayer', () => {
     context.currentTime = 3.3;
     expect(player.currentTime).toBeCloseTo(3.3, 5);
   });
+
+  it('decodes one file at a time so a fully split song never holds every stem twice', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const decode = context.decodeAudioData.bind(context);
+
+    context.decodeAudioData = async (data: ArrayBuffer) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1);
+      });
+      inFlight -= 1;
+
+      return decode(data);
+    };
+
+    const { player } = await makePlayer([
+      { name: 'drums', urls: ['drums.ogg', 'song.ogg'] },
+      { name: 'bass', urls: ['bass.ogg'] },
+      { name: 'vocals', urls: ['vocals.ogg'] },
+    ]);
+
+    expect(maxInFlight).toBe(1);
+    expect(player.audioTracks.map((t) => t.name)).toEqual([
+      'drums',
+      'bass',
+      'vocals',
+    ]);
+  });
 });

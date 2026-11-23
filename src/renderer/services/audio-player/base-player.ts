@@ -34,31 +34,39 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
 
   protected abstract createTrack(buffers: AudioBuffer[], name: string): TTrack;
 
+  /**
+   * Decodes one file at a time. A decoded stem is about 90 MB for a 4-minute
+   * song, so decoding a fully split song all at once can be more memory than a
+   * tablet's tab gets; one at a time, a subclass can shrink each track
+   * (createTrack) before the next one is decoded.
+   */
   private async createTracks(trackConfigs: TrackConfig[]): Promise<TTrack[]> {
-    return Promise.all(
-      trackConfigs.map(async ({ name, urls }) => {
-        const dataBuffers = await Promise.all(
-          urls.map((url) => fetch(url).then((res) => res.arrayBuffer())),
-        );
-        const decodedBuffers = await Promise.all(
-          dataBuffers.map((buf) => this.context.decodeAudioData(buf)),
-        );
-        const minDurationSeconds = this.getMinDurationSeconds();
-        const audioBuffers = decodedBuffers.map((buffer) =>
+    const tracks: TTrack[] = [];
+
+    for (const { name, urls } of trackConfigs) {
+      const audioBuffers: AudioBuffer[] = [];
+
+      for (const url of urls) {
+        const data = await fetch(url).then((res) => res.arrayBuffer());
+        const decoded = await this.context.decodeAudioData(data);
+
+        audioBuffers.push(
           trimTrailingSilence(
-            buffer,
+            decoded,
             this.context,
             undefined,
-            minDurationSeconds,
+            this.getMinDurationSeconds(),
           ),
         );
-        const track = this.createTrack(audioBuffers, name);
+      }
 
-        this.audioTracks.push(track);
+      const track = this.createTrack(audioBuffers, name);
 
-        return track;
-      }),
-    );
+      this.audioTracks.push(track);
+      tracks.push(track);
+    }
+
+    return tracks;
   }
 
   pause(): void {

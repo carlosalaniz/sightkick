@@ -4,10 +4,11 @@ import {
   StretchUnit,
   VoiceGroup,
 } from './build-units';
+import { PcmChannel } from './pcm';
 
 type InitMessage = {
   type: 'init';
-  channels: Float32Array[];
+  channels: PcmChannel[];
   speed: number;
   groups: VoiceGroup[];
   sampleRate: number;
@@ -25,7 +26,7 @@ type RequestMessage =
   | SeekMessage
   | ProduceMessage;
 
-let channels: Float32Array[] = [];
+let channels: PcmChannel[] = [];
 let groups: VoiceGroup[] = [];
 let sampleRate = 44100;
 let onsetsByGroup: (number[] | undefined)[] = [];

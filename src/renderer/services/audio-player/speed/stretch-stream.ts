@@ -5,16 +5,22 @@ import {
   VoiceGroup,
 } from './build-units';
 import { SampleBlock } from '../types';
+import { PcmChannel } from './pcm';
+
+function uniqueBuffers(channels: PcmChannel[]): ArrayBuffer[] {
+  return [...new Set(channels.map((c) => c.buffer as ArrayBuffer))];
+}
 
 export class StretchStream {
   private worker: Worker | undefined;
   private units: StretchUnit[] = [];
-  private channels: Float32Array[] = [];
+  private channels: PcmChannel[] = [];
   private groups: VoiceGroup[] = [];
   private sampleRate = 44100;
   private onsetsByGroup: (number[] | undefined)[] = [];
   private pending = new Map<number, (blocks: SampleBlock[]) => void>();
   private nextId = 0;
+  private channelCount = 0;
 
   constructor() {
     if (typeof Worker === 'undefined') {
@@ -43,28 +49,39 @@ export class StretchStream {
     }
   }
 
+  /**
+   * With a worker, the channels are transferred to it, not copied: they are
+   * the whole song's audio, and a second copy can be too much for a tablet.
+   * The caller's arrays are empty afterwards.
+   */
   init(
-    channels: Float32Array[],
+    channels: PcmChannel[],
     speed: number,
     groups: VoiceGroup[],
     sampleRate: number,
   ) {
-    this.channels = channels;
     this.groups = groups;
     this.sampleRate = sampleRate;
     this.onsetsByGroup = new Array(groups.length).fill(undefined);
 
     if (this.worker) {
-      this.worker.postMessage({
-        type: 'init',
-        channels,
-        speed,
-        groups,
-        sampleRate,
-      });
+      this.channelCount = channels.length;
+      this.worker.postMessage(
+        {
+          type: 'init',
+          channels,
+          speed,
+          groups,
+          sampleRate,
+        },
+        uniqueBuffers(channels),
+      );
 
       return;
     }
+
+    this.channels = channels;
+    this.channelCount = channels.length;
 
     this.units = buildUnits(
       channels,
@@ -114,7 +131,7 @@ export class StretchStream {
     }
 
     return Promise.resolve(
-      scatterBlocks(this.units, this.channels.length, frames),
+      scatterBlocks(this.units, this.channelCount, frames),
     );
   }
 

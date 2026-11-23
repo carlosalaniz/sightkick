@@ -57,6 +57,8 @@ export interface SongData {
   audio: AudioData[];
   /** Drum stem split into kit pieces (kick, snare, ...), if it was split. */
   drumKit?: AudioData[];
+  /** Every instrument stem but the drums in one file (see BACKING_STEM). */
+  backing?: AudioData;
   drumDifficulties?: Difficulty[];
   scoreData?: Partial<Record<Difficulty, ScoreData>>;
 }
@@ -78,6 +80,7 @@ export interface Song {
   format: 'mid' | 'chart';
   audio: AudioData[];
   drumKit?: AudioData[];
+  backing?: AudioData;
   drumDifficulties?: Difficulty[];
   liked?: boolean;
   updatedAt?: string;

@@ -5,7 +5,7 @@ import { App as AntdApp } from 'antd';
 import { MemoryRouter } from 'react-router-dom';
 import { AudioData, Song } from '../../types';
 import { installIpcMock, IpcMock } from './test-support';
-import { useSongLoader } from './useSongLoader';
+import { buildTrackData, useSongLoader } from './useSongLoader';
 
 let ipc: IpcMock;
 
@@ -106,5 +106,39 @@ describe('useSongLoader', () => {
     unmount();
 
     expect(ipc.onceCount('load-song')).toBe(0);
+  });
+});
+
+describe('buildTrackData', () => {
+  const split = {
+    audio: [
+      { name: 'drums', src: 'drums.ogg' },
+      { name: 'bass', src: 'bass.ogg' },
+      { name: 'vocals', src: 'vocals.ogg' },
+      { name: 'song', src: 'song.ogg' },
+      { name: 'crowd', src: 'crowd.ogg' },
+    ],
+    backing: { name: 'backing', src: 'backing.ogg' },
+  };
+
+  it('plays the backing mix instead of the instrument stems when asked to', () => {
+    expect(buildTrackData(split, true)).toEqual([
+      { name: 'drums', urls: ['drums.ogg'] },
+      { name: 'backing', urls: ['backing.ogg'] },
+      { name: 'crowd', urls: ['crowd.ogg'] },
+    ]);
+  });
+
+  it('keeps every stem otherwise, or when the song has no backing mix', () => {
+    const all = [
+      { name: 'drums', urls: ['drums.ogg'] },
+      { name: 'bass', urls: ['bass.ogg'] },
+      { name: 'vocals', urls: ['vocals.ogg'] },
+      { name: 'song', urls: ['song.ogg'] },
+      { name: 'crowd', urls: ['crowd.ogg'] },
+    ];
+
+    expect(buildTrackData(split, false)).toEqual(all);
+    expect(buildTrackData({ audio: split.audio }, true)).toEqual(all);
   });
 });

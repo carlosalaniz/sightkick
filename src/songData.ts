@@ -23,6 +23,7 @@ export function toSong(stored: SongData): Song {
     format: stored.format,
     audio: stored.audio,
     ...(stored.drumKit?.length ? { drumKit: stored.drumKit } : {}),
+    ...(stored.backing ? { backing: stored.backing } : {}),
     drumDifficulties: stored.drumDifficulties,
     liked: stored.liked,
     updatedAt: stored.updatedAt,
@@ -47,6 +48,17 @@ export const DRUM_KIT_PIECES = [
 ] as const;
 
 export type DrumKitPiece = (typeof DRUM_KIT_PIECES)[number];
+
+/**
+ * The stem server's mix of every instrument stem except the drums, stored as
+ * drumkit/backing.ogg (a folder Clone Hero ignores, so it never plays on top
+ * of the stems there). Small devices play it instead of the separate stems.
+ */
+export const BACKING_STEM = 'backing';
+
+/** Audio the backing mix stands in for: everything but drums and crowd. */
+export const isCoveredByBacking = (a: { name: string }) =>
+  !isDrumAudio(a) && a.name !== 'crowd';
 
 /** Drum audio of its own: drums, or drums_1..4 in multitrack charts. */
 export const isDrumAudio = (a: { name: string }) =>

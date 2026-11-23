@@ -1,5 +1,6 @@
 import { SongData } from '../types';
 import {
+  BACKING_STEM,
   DRUM_KIT_DIR,
   hasDrumAudio,
   isDrumAudio,
@@ -394,23 +395,43 @@ async function followSplit(
     }
   }
 
-  const kitStems = stems.filter((s) => s.name.startsWith(KIT_STEM_PREFIX));
+  const backingName = `${BACKING_STEM}.ogg`;
+  const isKitStem = (name: string) => name.startsWith(KIT_STEM_PREFIX);
+  const kitStems = stems.filter((s) => isKitStem(s.name));
 
   if (kitStems.length > 0) {
-    // Replace any earlier kit split rather than mixing old and new pieces.
-    await dir
-      .removeEntry(DRUM_KIT_DIR, { recursive: true })
+    // Replace any earlier kit split rather than mixing old and new pieces,
+    // but keep the backing mix: a kit pass on drums from an earlier stem
+    // split doesn't bring a new one.
+    const old = await dir
+      .getDirectoryHandle(DRUM_KIT_DIR)
       .catch(() => undefined);
+
+    if (old) {
+      const names: string[] = [];
+
+      for await (const entry of old.values()) {
+        if (entry.name !== backingName) {
+          names.push(entry.name);
+        }
+      }
+
+      for (const name of names) {
+        await old.removeEntry(name, { recursive: true }).catch(() => undefined);
+      }
+    }
   }
 
-  const kitDir =
-    kitStems.length > 0
-      ? await dir.getDirectoryHandle(DRUM_KIT_DIR, { create: true })
-      : undefined;
+  // Kit pieces and the backing mix live in drumkit/, where Clone Hero won't
+  // play them on top of the stems.
+  const kitDir = stems.some((s) => isKitStem(s.name) || s.name === backingName)
+    ? await dir.getDirectoryHandle(DRUM_KIT_DIR, { create: true })
+    : undefined;
 
   for (const stem of stems) {
-    const isKit = stem.name.startsWith(KIT_STEM_PREFIX);
-    const target = isKit && kitDir ? kitDir : dir;
+    const isKit = isKitStem(stem.name);
+    const target =
+      (isKit || stem.name === backingName) && kitDir ? kitDir : dir;
     const name = isKit ? stem.name.slice(KIT_STEM_PREFIX.length) : stem.name;
     const writable = await (
       await target.getFileHandle(name, { create: true })

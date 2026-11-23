@@ -100,4 +100,28 @@ describe('SpeedAudioTrack', () => {
 
     context.gainNodes.forEach((node) => expect(node.disconnected).toBe(true));
   });
+
+  it('keeps its audio as 16-bit samples and drops the decoded buffers', () => {
+    const buffer = makeBuffer(
+      [
+        [0.5, -0.5],
+        [0, 1],
+      ],
+      2,
+    );
+    const track = new SpeedAudioTrack(
+      [buffer as unknown as AudioBuffer],
+      'drums',
+      context as unknown as AudioContext,
+    );
+
+    expect(track.buffers).toEqual([]);
+    expect(track.duration).toBe(1);
+    expect(track.formats).toEqual([{ channels: 2, sampleRate: 2 }]);
+
+    const pcm = track.takePcm();
+
+    expect(Array.from(pcm[0][0])).toEqual([16384, -16384]);
+    expect(track.takePcm()).toEqual([]);
+  });
 });

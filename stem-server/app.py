@@ -21,6 +21,7 @@ audio that's already being split joins that job instead of starting another.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -92,6 +93,10 @@ KIT_PIECE_NAMES = {
     "crash": "crash",
     "cymbals": "cymbals",
 }
+
+# Every instrument stem except the drums, mixed into one file. Small devices
+# play it instead of the separate stems, so they decode one file, not five.
+BACKING = "backing"
 
 log = logging.getLogger("stem-server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -295,8 +300,20 @@ def kit_file_name(model_stem: str) -> str:
     return "kit_" + KIT_PIECE_NAMES.get(key, re.sub(r"[^a-z0-9]+", "_", key))
 
 
+def is_backing_part(name: str) -> bool:
+    """Whether a stem belongs in the backing mix: instruments, not drums or kit pieces."""
+    return name not in ("drums", BACKING) and not name.startswith("kit_")
+
+
+def mix_backing(parts: list[Path], dest: Path) -> None:
+    run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", *[a for p in parts for a in ("-i", str(p))],
+         "-filter_complex", f"amix=inputs={len(parts)}:normalize=0",
+         "-c:a", "libvorbis", "-q:a", OGG_QUALITY, str(dest)])
+
+
 def encode(job: Job, named: list[tuple[str, Path]], span: tuple[float, float]) -> None:
     lo, hi = span
+    backing_parts: list[Path] = []
     for index, (name, wav) in enumerate(named):
         if job.cancelled:
             raise Cancelled()
@@ -305,6 +322,8 @@ def encode(job: Job, named: list[tuple[str, Path]], span: tuple[float, float]) -
             # e.g. "keys" on a song without piano, or "ride" on a song that
             # never touches it: skip it so the mixer doesn't show a dead slider.
             continue
+        if is_backing_part(name):
+            backing_parts.append(wav)
         ogg = job.dir / f"{name}.ogg"
         if ogg.exists():
             # Two model stems mapped to the same name: mix them together.
@@ -316,6 +335,16 @@ def encode(job: Job, named: list[tuple[str, Path]], span: tuple[float, float]) -
             run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(wav),
                  "-c:a", "libvorbis", "-q:a", OGG_QUALITY, str(ogg)])
         job.stems[name] = ogg
+    # One instrument stem is its own backing; mixing only pays off from two.
+    if len(backing_parts) >= 2:
+        backing = job.dir / f"{BACKING}.ogg"
+        try:
+            mix_backing(backing_parts, backing)
+            job.stems[BACKING] = backing
+        except RuntimeError:
+            # The stems themselves are fine; the app falls back to them.
+            log.exception("Couldn't mix the backing track for job %s", job.id)
+            backing.unlink(missing_ok=True)
 
 
 def models_for(mode: str, quality: str) -> list[str]:
@@ -356,6 +385,33 @@ def cache_lookup(key: str) -> dict[str, Path] | None:
         log.warning("Cache entry %s is incomplete; ignoring it", key)
         return None
     return stems
+
+
+def ensure_backing(key: str, stems: dict[str, Path]) -> dict[str, Path]:
+    """Adds the backing mix to a cache entry stored before splits made one, so
+    old entries gain it without splitting again. Best effort: on failure the
+    entry is served as it was."""
+    parts = [path for name, path in sorted(stems.items()) if is_backing_part(name)]
+    if BACKING in stems or len(parts) < 2:
+        return stems
+    entry = cache_entry(key)
+    token = uuid.uuid4().hex
+    tmp_ogg = entry / f".{BACKING}.{token}.ogg"
+    tmp_manifest = entry / f".manifest.{token}.json"
+    try:
+        mix_backing(parts, tmp_ogg)
+        tmp_ogg.replace(entry / f"{BACKING}.ogg")
+        manifest = json.loads((entry / "manifest.json").read_text())
+        manifest["stems"] = sorted({*manifest.get("stems", []), BACKING})
+        tmp_manifest.write_text(json.dumps(manifest, indent=2))
+        tmp_manifest.replace(entry / "manifest.json")
+        log.info("Added the backing mix to cache entry %s", key)
+        return {**stems, BACKING: entry / f"{BACKING}.ogg"}
+    except (OSError, ValueError, RuntimeError):
+        log.exception("Couldn't add the backing mix to cache entry %s", key)
+        tmp_ogg.unlink(missing_ok=True)
+        tmp_manifest.unlink(missing_ok=True)
+        return stems
 
 
 def cache_store(job: Job) -> None:
@@ -577,23 +633,29 @@ async def create_job(
     job = Job(id=job_id, dir=job_dir, inputs=inputs, quality=quality, mode=mode, cache_key=key)
     with lock:
         cached = cache_lookup(key) if key else None
-        joined = jobs.get(inflight.get(key, "")) if key else None
-        if cached:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            job.set(status="done", stage="done", progress=100, stems=cached, cached=True)
+        if not cached:
+            joined = jobs.get(inflight.get(key, "")) if key else None
+            if joined and joined.status in ("queued", "running") and not joined.cancelled:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                joined.watchers += 1
+                log.info("Job request joined running job %s (%d clients)", joined.id, joined.watchers)
+                return joined.to_json(queue_position(joined))
             jobs[job_id] = job
-            log.info("Job %s served from cache %s", job_id, key)
-            return job.to_json(None)
-        if joined and joined.status in ("queued", "running") and not joined.cancelled:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            joined.watchers += 1
-            log.info("Job request joined running job %s (%d clients)", joined.id, joined.watchers)
-            return joined.to_json(queue_position(joined))
+            if key:
+                inflight[key] = job_id
+    if not cached:
+        pending.put(job_id)
+        return job.to_json(queue_position(job))
+
+    assert key
+    shutil.rmtree(job_dir, ignore_errors=True)
+    # Outside the lock: mixing an old entry's backing takes a few seconds.
+    stems = await asyncio.to_thread(ensure_backing, key, cached)
+    job.set(status="done", stage="done", progress=100, stems=stems, cached=True)
+    with lock:
         jobs[job_id] = job
-        if key:
-            inflight[key] = job_id
-    pending.put(job_id)
-    return job.to_json(queue_position(job))
+    log.info("Job %s served from cache %s", job_id, key)
+    return job.to_json(None)
 
 
 def get_job(job_id: str) -> Job:

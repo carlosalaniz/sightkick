@@ -3,7 +3,12 @@ import { Difficulty, parseChartFile } from 'scan-chart';
 import { AudioData, Song, SongData } from '../types';
 import { ALL_DIFFICULTIES } from '../constants';
 import { stripColorMarkup } from '../colorMarkup';
-import { DRUM_KIT_DIR, DRUM_KIT_PIECES, toSong } from '../songData';
+import {
+  BACKING_STEM,
+  DRUM_KIT_DIR,
+  DRUM_KIT_PIECES,
+  toSong,
+} from '../songData';
 import { getFile, joinPath, LibraryRoot } from './library';
 
 export const SONG_ID_FILE = '.sightkick';
@@ -194,6 +199,7 @@ export async function buildSong(
         ]
       : [];
   });
+  const backingFile = kitFiles?.get(`${BACKING_STEM}.ogg`);
 
   return {
     ...meta,
@@ -203,6 +209,14 @@ export async function buildSong(
     format,
     audio,
     ...(drumKit.length > 0 ? { drumKit } : {}),
+    ...(backingFile
+      ? {
+          backing: {
+            src: toAssetRef(joinPath(rel, DRUM_KIT_DIR, backingFile.name)),
+            name: BACKING_STEM,
+          },
+        }
+      : {}),
     drumDifficulties,
     updatedAt: new Date(notesFile.lastModified).toISOString(),
     ...(existing?.liked !== undefined ? { liked: existing.liked } : {}),
@@ -269,8 +283,18 @@ export async function toUiSong(
   const audio = withAudio ? await resolve(stored.audio) : song.audio;
   const drumKit =
     withAudio && song.drumKit ? await resolve(song.drumKit) : song.drumKit;
+  const backing =
+    withAudio && song.backing
+      ? (await resolve([song.backing]))[0]
+      : song.backing;
 
-  return { ...song, albumCover, audio, ...(drumKit ? { drumKit } : {}) };
+  return {
+    ...song,
+    albumCover,
+    audio,
+    ...(drumKit ? { drumKit } : {}),
+    ...(backing ? { backing } : {}),
+  };
 }
 
 /** Runs `fn` over `items` with at most `limit` promises in flight. */

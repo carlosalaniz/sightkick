@@ -26,6 +26,8 @@ The first start downloads the Fast model (~80 MB); the Best model (~700 MB) down
 
 Then, in SightKick, open the **⋮** menu on a song that has a single audio file and choose **Split stems**. The original audio is replaced by one Ogg file per stem (`drums.ogg`, `bass.ogg`, `vocals.ogg`, `song.ogg`, and with Best also `guitar.ogg` and `keys.ogg`), which also show up as separate sliders in the mixer. Stems that come out silent are left out.
 
+When a split has two or more instrument stems besides the drums, the server also returns `backing`: those stems mixed into one file. The browser app saves it as `drumkit/backing.ogg`, where Clone Hero won't play it on top of the stems. On devices with 4 GB of RAM or less it plays that one file instead of the separate instrument stems, since every stem the browser decodes costs about 45–90 MB for a 4-minute song.
+
 ### Speed
 
 Separation runs on the CPU inside Docker, which on macOS can't use the Apple GPU. For speed on a Mac, run the server natively instead, which uses Metal (MPS):
@@ -51,6 +53,7 @@ Every finished split is saved on disk and never expires. The key is a SHA-256 of
 * Sending the same audio again, from any client, returns the stems immediately (`"cached": true` on the job) without running a model.
 * Sending audio that's already queued or being split joins that job instead of starting a second one. A client cancelling only stops the job if no other client is still following it.
 * Changing a model or `SK_OGG_QUALITY` starts a fresh set of entries; the old ones stay on disk until you delete them.
+* Entries stored before splits came with a `backing` mix get one the next time they're requested, mixed from the cached stems in a few seconds, without splitting again.
 
 Entries live in `SK_CACHE_DIR` as `<first 2 hex chars>/<key>/` with one `.ogg` per stem and a `manifest.json`. The cache only grows; to reclaim space, delete entry folders (or the whole directory) while the server is stopped. In Docker it's the `sightkick-stem-cache` volume; on Harbor it's the app's *split cache* storage.
 

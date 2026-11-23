@@ -2,6 +2,7 @@ import { FFT } from './fft';
 import { makeHann } from './window';
 import { lockPhases, principalArgument } from './phase';
 import { SampleBlock } from '../types';
+import { PcmChannel, pcmScale } from './pcm';
 
 const FFT_SIZE = 2048;
 
@@ -33,12 +34,15 @@ export class ChannelStretcher {
   private firstFrame = true;
   private onsetIndex = 0;
 
+  private readonly inputScale: number;
+
   constructor(
-    private readonly input: Float32Array,
+    private readonly input: PcmChannel,
     speed: number,
     private readonly onsets: number[] = [],
   ) {
     this.analysisHop = this.synthesisHop * speed;
+    this.inputScale = pcmScale(input);
 
     for (let k = 0; k < this.bins; k += 1) {
       this.omega[k] = (TWO_PI * k) / this.size;
@@ -108,8 +112,9 @@ export class ChannelStretcher {
       const index = start + i;
 
       this.re[i] =
-        (index >= 0 && index < this.input.length ? this.input[index] : 0) *
-        this.window[i];
+        (index >= 0 && index < this.input.length
+          ? this.input[index] * this.inputScale
+          : 0) * this.window[i];
       this.im[i] = 0;
     }
 

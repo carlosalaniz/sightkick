@@ -4,7 +4,9 @@ Needs ffmpeg plus: pip install fastapi python-multipart httpx numpy soundfile py
 Run from stem-server/: python -m pytest test_app.py
 """
 
+import hashlib
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -38,6 +40,7 @@ class StubSeparator:
     def __init__(self):
         self.runs = 0
         self.gate: threading.Event | None = None
+        self.names = ["drums", "bass"]
 
     def __call__(self, job, key, wav, out_dir, span):
         if self.gate:
@@ -45,11 +48,13 @@ class StubSeparator:
         self.runs += 1
         out_dir.mkdir()
         data, rate = sf.read(str(wav))
-        names = ["kick", "snare"] if key == "kit" else ["drums", "bass"]
+        names = ["kick", "snare"] if key == "kit" else self.names
         paths = []
-        for name in names:
+        for i, name in enumerate(names):
             path = out_dir / f"{name}.wav"
-            sf.write(str(path), data, rate)
+            # A different pitch per stem, so a mix differs from any one stem.
+            tone = 0.1 * np.sin(np.arange(len(data)) * (i + 1) / 20)
+            sf.write(str(path), data * 0.5 + (tone[:, None] if data.ndim == 2 else tone), rate)
             paths.append(path)
         return paths
 
@@ -169,3 +174,43 @@ def test_incomplete_cache_entry_is_a_miss(client, stub):
     assert again["cached"] is False
     assert wait_done(client, again["id"])["status"] == "done"
     assert stub.runs == 2
+
+
+def test_instrument_stems_also_come_mixed_into_a_backing_track(client, stub):
+    stub.names = ["drums", "bass", "vocals", "other"]
+    job = wait_done(client, post(client, wav_bytes(770))["id"])
+    assert job["stems"] == ["backing", "bass", "drums", "song", "vocals"]
+    backing = client.get(f"/jobs/{job['id']}/stems/backing").content
+    bass = client.get(f"/jobs/{job['id']}/stems/bass").content
+    assert len(backing) > 0 and backing != bass
+
+    again = post(client, wav_bytes(770))
+    assert again["cached"] is True
+    assert "backing" in again["stems"]
+
+
+def test_a_single_instrument_or_a_kit_split_gets_no_backing(client, stub):
+    job = wait_done(client, post(client, wav_bytes(880))["id"])
+    assert "backing" not in job["stems"]
+    kit = wait_done(client, post(client, wav_bytes(880), mode="kit")["id"])
+    assert "backing" not in kit["stems"]
+
+
+def test_old_cache_entries_gain_a_backing_track_without_splitting_again(client, stub):
+    stub.names = ["drums", "bass", "vocals"]
+    audio = wav_bytes(990)
+    wait_done(client, post(client, audio)["id"])
+    # Turn the entry into one stored before splits made a backing mix.
+    key = app.cache_key([hashlib.sha256(audio).hexdigest()], "stems", "fast")
+    manifest_path = app.cache_entry(key) / "manifest.json"
+    (manifest_path.parent / "backing.ogg").unlink()
+    manifest = json.loads(manifest_path.read_text())
+    manifest["stems"].remove("backing")
+    manifest_path.write_text(json.dumps(manifest))
+
+    again = post(client, audio)
+    assert again["cached"] is True
+    assert "backing" in again["stems"]
+    assert stub.runs == 1
+    assert "backing" in json.loads(manifest_path.read_text())["stems"]
+    assert client.get(f"/jobs/{again['id']}/stems/backing").status_code == 200

@@ -2,6 +2,7 @@ import { SpeedAudioTrack } from './track';
 import { StretchStream } from './stretch-stream';
 import { VoiceGroup } from './build-units';
 import { SYNTHESIS_HOP } from './channel-stretcher';
+import { PcmChannel } from './pcm';
 import { BaseAudioPlayer } from '../base-player';
 import {
   LoopWindow,
@@ -37,7 +38,7 @@ export class SpeedAudioPlayer
   onEnded: (() => void) | undefined;
   private _playbackSpeed: number = 1;
   private stream: StretchStream = new StretchStream();
-  private voices: Float32Array[] = [];
+  private voices: PcmChannel[] = [];
   private targets: ChunkTarget[] = [];
   private groups: VoiceGroup[] = [];
   private voicesBuilt: boolean = false;
@@ -145,6 +146,8 @@ export class SpeedAudioPlayer
             this.groups,
             this.context.sampleRate,
           );
+          // The stream owns the samples now (moved to its worker, if any).
+          this.voices = [];
           this.voicesBuilt = true;
         } else {
           this.stream.setSpeed(speed);
@@ -159,24 +162,24 @@ export class SpeedAudioPlayer
     this.groups = [];
 
     tracks.forEach((track) => {
-      track.buffers.forEach((buffer, fileIndex) => {
+      const pcm = track.takePcm();
+
+      track.formats.forEach(({ channels, sampleRate }, fileIndex) => {
         const voiceStart = this.voices.length;
 
-        for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-          this.voices.push(buffer.getChannelData(channel));
-        }
+        this.voices.push(...pcm[fileIndex]);
 
         this.targets.push({
           track,
           fileIndex,
-          channels: buffer.numberOfChannels,
+          channels,
           voiceStart,
-          sampleRate: buffer.sampleRate,
+          sampleRate,
         });
 
         this.groups.push({
           start: voiceStart,
-          count: buffer.numberOfChannels,
+          count: channels,
           kind: track.name === DRUM_TRACK_NAME ? 'transient' : 'vocoder',
         });
       });

@@ -9,6 +9,45 @@ import {
   Song,
 } from '../../types';
 import { TrackConfig } from '../services/audio-player/types';
+import { isCoveredByBacking } from '../../songData';
+
+/**
+ * Devices with 4 GB of RAM or less (Chromium's navigator.deviceMemory; other
+ * browsers don't say). Decoded stems take about 90 MB each for a 4-minute
+ * song, so a fully split song can be more than such a tab is allowed.
+ */
+export function isLowMemoryDevice(): boolean {
+  const memory = (navigator as { deviceMemory?: number }).deviceMemory;
+
+  return typeof memory === 'number' && memory <= 4;
+}
+
+/**
+ * The song's tracks for the player: its drum audio as one track, then every
+ * other file. With `preferBacking`, a song that has the stem server's backing
+ * mix plays that one file instead of the instrument stems it was mixed from.
+ */
+export function buildTrackData(
+  song: Pick<Song, 'audio' | 'backing'>,
+  preferBacking: boolean,
+): TrackConfig[] {
+  const drums = song.audio
+    .filter((file: AudioData) => file.name.includes('drums'))
+    .map((file: AudioData) => file.src);
+  const useBacking = preferBacking && song.backing !== undefined;
+  const other = song.audio
+    .filter((file: AudioData) => !file.name.includes('drums'))
+    .filter((file: AudioData) => !useBacking || !isCoveredByBacking(file))
+    .map((file: AudioData) => ({ urls: [file.src], name: file.name }));
+
+  return [
+    ...(drums.length ? [{ name: 'drums', urls: drums }] : []),
+    ...(useBacking && song.backing
+      ? [{ name: song.backing.name, urls: [song.backing.src] }]
+      : []),
+    ...other,
+  ];
+}
 
 interface SongLoaderResult {
   fileData: Buffer | undefined;
@@ -47,17 +86,7 @@ export function useSongLoader(id: string | undefined): SongLoaderResult {
       setFormat(data.format);
       setSongData(data);
 
-      const drums = data.audio
-        .filter((file: AudioData) => file.name.includes('drums'))
-        .map((file: AudioData) => file.src);
-      const other = data.audio
-        .filter((file: AudioData) => !file.name.includes('drums'))
-        .map((file: AudioData) => ({ urls: [file.src], name: file.name }));
-
-      setTrackData([
-        ...(drums.length ? [{ name: 'drums', urls: drums }] : []),
-        ...other,
-      ]);
+      setTrackData(buildTrackData(data, isLowMemoryDevice()));
     });
 
     window.electron.ipcRenderer.sendMessage('load-song', id);
