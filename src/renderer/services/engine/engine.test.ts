@@ -11,6 +11,8 @@ import {
 import { InputEvent } from '../../input/types';
 import { Engine } from './engine';
 import { EngineContext } from './types';
+import { MAX_HIT_TOLERANCE_MS } from './constants';
+import { log } from '../../../shared/log';
 
 vi.mock('../click-track/metronome', () => ({
   renderClickBuffers: vi.fn(() => ({ downbeat: {}, beat: {} })),
@@ -258,6 +260,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('Engine', () => {
@@ -681,6 +684,22 @@ describe('Engine mute drums on miss', () => {
 
     emitInput('midi:38');
     expect(drums.setVolume).toHaveBeenLastCalledWith(0.3, expect.any(Number));
+  });
+
+  it('clamps a hit window outside the settings range', async () => {
+    const { engine } = await gateSetup();
+
+    vi.spyOn(log, 'warn').mockImplementation(() => {});
+    engine.setJudgeSettings({
+      hitToleranceSeconds: 5,
+      muteDrumsOnMiss: false,
+    });
+
+    expect(engine.hitTolerance).toBe(MAX_HIT_TOLERANCE_MS / 1000);
+    expect(log.warn).toHaveBeenCalledWith(
+      'engine.hit_tolerance_clamped',
+      expect.objectContaining({ requested: 5 }),
+    );
   });
 
   it('applies the configured hit window to scoring', async () => {

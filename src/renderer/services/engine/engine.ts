@@ -6,6 +6,8 @@ import { AudioPlayer } from '../audio-player/types';
 import { playerFactoryForMode } from '../audio-player/factories';
 import { Transport } from './transport';
 import { assertNever } from '../../../shared/assertNever';
+import { log } from '../../../shared/log';
+import { clampHitTolerance } from './helpers';
 import { Judge } from './judge';
 import { GameRenderer } from './game-renderer';
 import { DRUM_GATE_FADE_SECONDS, DRUM_STEM_NAME } from './constants';
@@ -242,8 +244,17 @@ export class Engine {
   }
 
   setJudgeSettings(settings: JudgeSettings): void {
-    this.judge.setTolerance(settings.hitToleranceSeconds);
-    this.transport.setHitTolerance(settings.hitToleranceSeconds);
+    const tolerance = clampHitTolerance(settings.hitToleranceSeconds);
+
+    if (tolerance !== settings.hitToleranceSeconds) {
+      log.warn('engine.hit_tolerance_clamped', {
+        requested: settings.hitToleranceSeconds,
+        applied: tolerance,
+      });
+    }
+
+    this.judge.setTolerance(tolerance);
+    this.transport.setHitTolerance(tolerance);
     this.muteDrumsOnMiss = settings.muteDrumsOnMiss;
     this.applyDrumGain();
   }

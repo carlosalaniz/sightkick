@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { StaveNote } from 'vexflow';
 import {
+  clampHitTolerance,
   flashClass,
   forEachNoteHead,
   getScrollParent,
@@ -111,5 +112,22 @@ describe('getScrollParent', () => {
 
     expect(getScrollParent(child)).toBeUndefined();
     expect(getScrollParent(undefined)).toBeUndefined();
+  });
+});
+
+describe('clampHitTolerance', () => {
+  it('keeps a window inside the settings range', () => {
+    expect(clampHitTolerance(0.08)).toBe(0.08);
+  });
+
+  it('clamps to the narrowest and widest windows the settings offer', () => {
+    expect(clampHitTolerance(0.001)).toBe(0.02);
+    expect(clampHitTolerance(5)).toBe(0.3);
+    expect(clampHitTolerance(-1)).toBe(0.02);
+  });
+
+  it('falls back to the default for a value that is not a number', () => {
+    expect(clampHitTolerance(Number.NaN)).toBe(0.1);
+    expect(clampHitTolerance(Infinity)).toBe(0.1);
   });
 });

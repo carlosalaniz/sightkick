@@ -1,5 +1,26 @@
 import { StaveNote } from 'vexflow';
 import { NotePos } from './types';
+import {
+  HIT_TOLERANCE_SECONDS,
+  MAX_HIT_TOLERANCE_MS,
+  MIN_HIT_TOLERANCE_MS,
+} from './constants';
+
+/**
+ * A hit window within the range the settings offer. The setting is stored in
+ * the browser, so it can hold anything; a value that isn't a number at all
+ * gets the default.
+ */
+export function clampHitTolerance(seconds: number): number {
+  if (!Number.isFinite(seconds)) {
+    return HIT_TOLERANCE_SECONDS;
+  }
+
+  return Math.min(
+    MAX_HIT_TOLERANCE_MS / 1000,
+    Math.max(MIN_HIT_TOLERANCE_MS / 1000, seconds),
+  );
+}
 
 export function keyPrefix(key: string): string {
   const [pitch, octave] = key.split('/');
