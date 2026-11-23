@@ -283,7 +283,7 @@ class Job:
 jobs: dict[str, Job] = {}
 # Cache key -> id of the queued or running job producing it.
 inflight: dict[str, str] = {}
-pending: "queue.Queue[str]" = queue.Queue()
+pending: queue.Queue[str] = queue.Queue()
 lock = threading.Lock()
 current_job: Job | None = None
 # quality -> {"status": not loaded | loading | ready | error, "error": str}
@@ -723,7 +723,8 @@ def expire_overdue_job() -> None:
     job.cancelled = True
     if finish(job, "error", "timed_out"):
         job.log_outcome()
-        log.error("Job %s is stuck past its deadline; timed it out. The worker stays busy until the model returns.", job.id)
+        log.error("Job %s is stuck past its deadline; timed it out. The worker stays busy until the model returns.",
+                  job.id)
 
 
 def janitor(stop: threading.Event) -> None:

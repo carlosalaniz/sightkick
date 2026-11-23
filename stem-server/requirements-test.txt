@@ -1,0 +1,9 @@
+# What the tests need, without the models (test_app.py fakes audio-separator).
+# fastapi and python-multipart match requirements.txt, so CI tests what ships.
+fastapi==0.115.6
+python-multipart==0.0.20
+httpx==0.28.1
+numpy==2.5.5
+soundfile==0.14.0
+pytest==9.2.0
+ruff==0.17.6

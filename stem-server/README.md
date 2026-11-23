@@ -134,9 +134,12 @@ The job queue, cache and error outcomes have tests that fake the separation libr
 
 ```bash
 cd stem-server
-pip install fastapi python-multipart httpx numpy soundfile pytest
+pip install -r requirements-test.txt
 python -m pytest test_app.py
+ruff check --isolated --target-version py312 --line-length 120 --select E,F,W,B,I,UP --ignore B008 app.py test_app.py
 ```
+
+CI runs both on every push and pull request that touches `stem-server/` (`.github/workflows/stem-server.yml`). Ruff's B008 is off because FastAPI declares form fields as `File(...)` / `Form(...)` defaults.
 
 ## License note
 

@@ -1,6 +1,6 @@
 """Tests for the job queue and split cache, with the separation library faked.
 
-Needs ffmpeg plus: pip install fastapi python-multipart httpx numpy soundfile pytest
+Needs ffmpeg plus: pip install -r requirements-test.txt
 Run from stem-server/: python -m pytest test_app.py
 """
 
@@ -26,8 +26,9 @@ _tmp = Path(tempfile.mkdtemp(prefix="sk-stem-test-"))
 os.environ["SK_CACHE_DIR"] = str(_tmp / "cache")
 os.environ["SK_WORK_DIR"] = str(_tmp / "work")
 
-import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+
+import app  # noqa: E402
 
 
 def wav_bytes(freq: float) -> bytes:
