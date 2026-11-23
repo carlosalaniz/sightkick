@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { TimelineNote } from '../../../../kit';
-import { dueNotes, effectiveGrace, offsetStats, TempoMeter } from './pace';
+import { TimelineBar } from '../../../../kit';
+import {
+  dueNotes,
+  effectiveGrace,
+  offsetStats,
+  runUpStart,
+  TempoMeter,
+} from './pace';
 import { tempoVerdict } from './TempoBar';
 
 const note = (tick: number, time: number, voice = 'kick'): TimelineNote =>
@@ -21,14 +28,14 @@ describe('dueNotes', () => {
   const none = () => false;
 
   it('waits for every voice at the earliest due tick', () => {
-    expect(dueNotes(notes, none, 0.99, 0.1).map((n) => n.id)).toEqual([
+    expect(dueNotes(notes, none, 1, 0.1).map((n) => n.id)).toEqual([
       '0:kick',
       '0:hihat',
     ]);
   });
 
   it('is empty before a note is due', () => {
-    expect(dueNotes(notes, none, 0.9, 0.1)).toEqual([]);
+    expect(dueNotes(notes, none, 0.99, 0.1)).toEqual([]);
   });
 
   it('drops voices already hit and moves on once all are', () => {
@@ -48,14 +55,50 @@ describe('dueNotes', () => {
   });
 
   it('keeps playing through the grace before holding', () => {
-    expect(dueNotes(notes, none, 1.02, 0.1, 0.06)).toEqual([]);
-    expect(dueNotes(notes, none, 1.045, 0.1, 0.06)).toHaveLength(2);
+    expect(dueNotes(notes, none, 1.055, 0.1, 0.06)).toEqual([]);
+    expect(dueNotes(notes, none, 1.06, 0.1, 0.06)).toHaveLength(2);
+  });
+
+  it('keeps holding for a note past its hit window once the song stopped for it', () => {
+    const holding = new Set(['0:kick', '0:hihat']);
+
+    expect(dueNotes(notes, none, 1.15, 0.1, 0.06)).toEqual([]);
+    expect(dueNotes(notes, none, 1.15, 0.1, 0.06, holding)).toHaveLength(2);
+    // Half a second on is a seek, not a late freeze.
+    expect(dueNotes(notes, none, 1.52, 0.1, 0.06, holding)).toEqual([]);
   });
 
   it('caps the grace so a held note can still be judged', () => {
     expect(effectiveGrace(60, 0.1)).toBeCloseTo(0.06);
     expect(effectiveGrace(90, 0.1)).toBeCloseTo(0.07);
     expect(effectiveGrace(90, 0.02)).toBe(0);
+  });
+});
+
+describe('runUpStart', () => {
+  // Two 4/4 bars at 120 BPM from t = 2: beats every 0.5 s.
+  const bar = (i: number) =>
+    ({
+      start: 2 + i * 2,
+      end: 4 + i * 2,
+      beats: [0, 0.5, 1, 1.5].map((b) => 2 + i * 2 + b),
+    }) as TimelineBar;
+  const bars = [bar(0), bar(1)];
+
+  it('starts a beat before a note on the beat', () => {
+    expect(runUpStart(3, bars)).toBeCloseTo(2.5);
+    expect(runUpStart(4, bars)).toBeCloseTo(3.5);
+  });
+
+  it('starts on the beat before for a note between beats', () => {
+    expect(runUpStart(3.25, bars)).toBeCloseTo(2.5);
+    expect(runUpStart(3.125, bars)).toBeCloseTo(2.5);
+    expect(runUpStart(3.375, bars)).toBeCloseTo(3);
+  });
+
+  it('never starts before the floor', () => {
+    expect(runUpStart(2, bars, 2)).toBe(2);
+    expect(runUpStart(3, bars, 2.8)).toBe(2.8);
   });
 });
 

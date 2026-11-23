@@ -30,6 +30,12 @@ import {
   SNAPSHOT_KEYS,
 } from './constants';
 
+/**
+ * How far behind the frozen time a resumed song may read and still count as
+ * settling; anything further is a real jump (a loop wrap) and is shown.
+ */
+const SETTLE_SECONDS = 0.25;
+
 export class Transport {
   readonly timeStore = new TimeStore();
   private isDev: boolean;
@@ -55,6 +61,8 @@ export class Transport {
    * the song stutter between hold and release.
    */
   private frozenTime: number | undefined;
+  /** A release's resume is in flight: the context is still frozen. */
+  private resuming = false;
   private freezeTimer: ReturnType<typeof setTimeout> | undefined;
   private speedPlayer: SpeedControllableAudioPlayer | undefined;
   private state: PlaybackState = 'idle';
@@ -141,7 +149,10 @@ export class Transport {
   }
 
   setPlaybackSpeed(speed: number): void {
-    if (this.state === 'counting-in') {
+    // A held song's context is suspended, and the player only re-times its
+    // audio for a new speed while the context runs: changed then, the song
+    // jumped ahead on release. It takes the new speed once it runs again.
+    if (this.state === 'counting-in' || this.isFrozen) {
       this.pendingSpeed = speed;
 
       return;
@@ -385,7 +396,7 @@ export class Transport {
 
     // Still frozen from a release whose resume hasn't finished (and still
     // silent): freeze again at once.
-    if (!player.fadeTo || this.frozenTime !== undefined) {
+    if (!player.fadeTo || this.resuming) {
       this.freeze();
 
       return;
@@ -406,7 +417,12 @@ export class Transport {
       return;
     }
 
-    this.frozenTime ??= this.audioPlayer.currentTime;
+    // Never behind the time already shown: a step back reads as a rewind.
+    const live = this.audioPlayer.currentTime;
+    const shown = this.position;
+
+    this.frozenTime ??=
+      live < shown && shown - live < SETTLE_SECONDS ? shown : live;
     void this.audioPlayer.context.suspend().catch(() => {});
   }
 
@@ -424,6 +440,7 @@ export class Transport {
       clearTimeout(this.freezeTimer);
       this.freezeTimer = undefined;
       player?.fadeTo?.(1, HOLD_FADE_SECONDS);
+      this.flushPendingSpeed();
 
       return;
     }
@@ -435,12 +452,20 @@ export class Transport {
       return;
     }
 
+    this.resuming = true;
     void player.context
       .resume()
       .catch(() => {})
       .then(() => {
+        this.resuming = false;
+
         if (!this.held) {
-          this.frozenTime = undefined;
+          this.flushPendingSpeed();
+        }
+
+        // frozenTime stays until the live time catches up with it (see
+        // updatePlaybackPosition), so the song never steps back on release.
+        if (!this.held) {
           player.fadeTo?.(1, HOLD_FADE_SECONDS);
         }
       });
@@ -457,8 +482,20 @@ export class Transport {
       this.audioPlayer?.fadeTo?.(1, 0);
     }
 
+    const wasFrozen = this.isFrozen;
+
     this.held = false;
+    this.resuming = false;
     this.frozenTime = undefined;
+
+    if (wasFrozen && this.state !== 'counting-in') {
+      this.flushPendingSpeed();
+    }
+  }
+
+  /** Held, or not yet running again after a release. */
+  private get isFrozen(): boolean {
+    return this.held || this.resuming;
   }
 
   get isHeld(): boolean {
@@ -498,10 +535,15 @@ export class Transport {
       return;
     }
 
+    // Seeking out of a hold (wait mode's run-up): start silent and fade in
+    // as the audio starts, instead of cutting in mid-waveform.
+    const fromHold = this.isFrozen || this.frozenTime !== undefined;
+
     this.clearHold();
 
     this.playGeneration += 1;
 
+    const generation = this.playGeneration;
     const wasActive = this.state === 'playing' || this.state === 'counting-in';
 
     this.clearScheduling();
@@ -533,7 +575,31 @@ export class Transport {
     this.flushPendingSpeed();
     this.clickTrack?.cancelGain();
     this.clickTrack?.setGain(this.clickVolume);
-    this.startAudio(seconds);
+
+    const player = this.audioPlayer;
+
+    if (fromHold && player.fadeTo) {
+      player.fadeTo(0, 0);
+      Promise.resolve(player.start(seconds))
+        .then(() =>
+          generation === this.playGeneration
+            ? player.fadeTo?.(
+                1,
+                HOLD_FADE_SECONDS,
+                player.contextTimeForSongTime(seconds),
+              )
+            : player.fadeTo?.(1, 0),
+        )
+        .catch((error) => {
+          player.fadeTo?.(1, 0);
+          this.onErrorCb();
+
+          return error;
+        });
+    } else {
+      this.startAudio(seconds);
+    }
+
     this.emit();
   }
 
@@ -663,7 +729,7 @@ export class Transport {
       return;
     }
 
-    const rawTime = this.frozenTime ?? this.audioPlayer.currentTime;
+    const rawTime = this.heldTime(this.audioPlayer);
 
     if (!this.loopRegion) {
       this.setPosition(rawTime);
@@ -698,6 +764,32 @@ export class Transport {
     }
 
     this.setPosition(startTime + ((rawTime - startTime) % span));
+  }
+
+  /**
+   * The song time: frozen while held, and after a release until the live time
+   * catches up, since the first readings of a resumed context can sit a
+   * little behind the moment it froze.
+   */
+  private heldTime(player: AudioPlayer): number {
+    const live = player.currentTime;
+    const frozen = this.frozenTime;
+
+    if (frozen === undefined) {
+      return live;
+    }
+
+    if (this.held || this.resuming || player.context.state !== 'running') {
+      return frozen;
+    }
+
+    if (live < frozen && frozen - live < SETTLE_SECONDS) {
+      return frozen;
+    }
+
+    this.frozenTime = undefined;
+
+    return live;
   }
 
   private scheduleClicks(): void {

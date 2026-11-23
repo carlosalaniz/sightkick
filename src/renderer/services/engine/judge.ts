@@ -9,7 +9,6 @@ import {
   JudgedHitHandler,
   LoopRegion,
   NoteEntry,
-  NotePos,
 } from './types';
 import {
   ACCENT_VALUE_THRESHOLD,
@@ -42,6 +41,8 @@ export class Judge {
   private gateTick: number | undefined;
   private gateLookaheadSeconds = 0;
   private gateListeners = new Set<JudgeGateHandler>();
+  /** Ticks a hit is offered to first (wait mode's held notes). */
+  private focusTicks = new Set<number>();
 
   setContext(context: JudgeContext): void {
     const chartChanged = this.chart !== context.chart;
@@ -67,6 +68,17 @@ export class Judge {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+  }
+
+  /**
+   * Notes the song is holding for (wait mode). A hit that matches one of them
+   * goes to it, at any distance and any velocity, before the nearest note is
+   * considered: the held note is what the player is reaching for, and the song
+   * stops a little after it, so a following note on the same pad can be
+   * nearer and would otherwise take every hit, leaving the song stuck.
+   */
+  setFocus(ticks: Iterable<number>): void {
+    this.focusTicks = new Set(ticks);
   }
 
   /** Half-width of the hit window, in seconds, on either side of a note. */
@@ -172,6 +184,7 @@ export class Judge {
     this.hits.clear();
     this.hitTotal = 0;
     this.falseHitTicks = [];
+    this.focusTicks.clear();
     this.resetGate(undefined);
   }
 
@@ -282,6 +295,27 @@ export class Judge {
     return tick >= seamTick ? tick - (loop.endTick - loop.startTick) : tick;
   }
 
+  /** The earliest held note that can take the hit, if any. */
+  private focusedEntry(
+    takes: (entry: NoteEntry) => boolean,
+  ): NoteEntry | undefined {
+    const ticks = [...this.focusTicks].sort((a, b) => a - b);
+
+    for (const focusTick of ticks) {
+      for (
+        let i = this.firstNoteAtOrAfter(focusTick);
+        i < this.noteIndex.length && this.noteIndex[i].tick === focusTick;
+        i += 1
+      ) {
+        if (takes(this.noteIndex[i])) {
+          return this.noteIndex[i];
+        }
+      }
+    }
+
+    return undefined;
+  }
+
   private firstNoteAtOrAfter(tick: number): number {
     return lowerBound(
       this.noteIndex.length,
@@ -372,13 +406,21 @@ export class Judge {
         chart.resolution,
         chart.tempos,
       ) - tick;
+    // A note can take this hit if one of its parts matches and isn't hit yet;
+    // a note already fully hit doesn't soak up the next hit.
+    const takes = (entry: NoteEntry) =>
+      entry.note.notes.some((k) => {
+        const p = keyPrefix(k);
+
+        return expectedPrefixes.has(p) && !this.isHit(entry.tick, p);
+      });
+    let best = this.focusedEntry(takes);
+    const focused = best !== undefined;
     let bestDist = Infinity;
-    let bestNote: Note | undefined;
-    let bestPos: NotePos | undefined;
 
     for (
       let i = this.firstNoteAtOrAfter(tick - toleranceTicks);
-      i < this.noteIndex.length;
+      !focused && i < this.noteIndex.length;
       i += 1
     ) {
       const entry = this.noteIndex[i];
@@ -389,29 +431,20 @@ export class Judge {
 
       const dist = Math.abs(entry.tick - tick);
 
-      if (dist >= bestDist) {
-        continue;
-      }
-
-      const hasMatchingKey = entry.note.notes.some((k) =>
-        expectedPrefixes.has(keyPrefix(k)),
-      );
-
-      if (hasMatchingKey) {
+      if (dist < bestDist && takes(entry)) {
         bestDist = dist;
-        bestNote = entry.note;
-        bestPos = entry.pos;
+        best = entry;
       }
     }
 
-    if (!bestNote || !bestPos) {
+    if (!best) {
       this.maybeRecordFalseHit(tick, toleranceTicks);
 
       return;
     }
 
-    const hit = bestNote;
-    const pos = bestPos;
+    const hit: Note = best.note;
+    const { pos } = best;
     const accentPrefixes = new Set((hit.accents ?? []).map(keyPrefix));
     const ghostPrefixes = new Set((hit.ghosts ?? []).map(keyPrefix));
     const passesVelocity = (prefix: string) => {
@@ -425,14 +458,15 @@ export class Judge {
 
       return true;
     };
-    const newPrefixes = hit.notes
-      .map(keyPrefix)
-      .filter(
-        (p) =>
-          expectedPrefixes.has(p) &&
-          !this.isHit(hit.tick, p) &&
-          passesVelocity(p),
-      );
+    const newPrefixes = hit.notes.map(keyPrefix).filter(
+      (p) =>
+        expectedPrefixes.has(p) &&
+        !this.isHit(hit.tick, p) &&
+        // A held note takes any velocity: wait mode is for finding the
+        // pads, and a ghost note a keyboard can't play softly enough for
+        // would hold the song forever.
+        (focused || passesVelocity(p)),
+    );
 
     if (newPrefixes.length === 0) {
       this.maybeRecordFalseHit(tick, toleranceTicks);

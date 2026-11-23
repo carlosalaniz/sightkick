@@ -33,7 +33,7 @@ export interface AudioPlayer {
   /** Seconds between scheduling audio and hearing it. */
   outputLatency?: number;
   /** Glides the output to `level` of the master volume (wait mode's holds). */
-  fadeTo?(level: number, seconds: number): void;
+  fadeTo?(level: number, seconds: number, at?: number): void;
   destroy(): void;
 }
 

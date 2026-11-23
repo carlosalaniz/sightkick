@@ -350,6 +350,67 @@ describe('Judge', () => {
     expect(engine.isHit(530, 'c/5')).toBe(false);
   });
 
+  it('gives a hit to the next note when the nearest is already hit', () => {
+    // 120 BPM, 480 ticks a beat: 48 ticks = 50 ms, inside the 100 ms window.
+    const { engine } = setup(
+      { measures: [measure([note(['c/5'], 480), note(['c/5'], 528)])] },
+      { tick: 480 },
+    );
+
+    engine.handleInput(hit('midi:38'));
+    engine.handleInput(hit('midi:38'));
+
+    expect(engine.isHit(480, 'c/5')).toBe(true);
+    expect(engine.isHit(528, 'c/5')).toBe(true);
+    expect(engine.falseHitCount).toBe(0);
+  });
+
+  it('gives a hit to a held note before a nearer one on the same pad', () => {
+    // Held 60 ms after the note at 480; the next 16th (100 ms on) is nearer.
+    const { engine } = setup(
+      { measures: [measure([note(['c/5'], 480), note(['c/5'], 576)])] },
+      { tick: 538 },
+    );
+
+    engine.setFocus([480]);
+    engine.handleInput(hit('midi:38'));
+
+    expect(engine.isHit(480, 'c/5')).toBe(true);
+    expect(engine.isHit(576, 'c/5')).toBe(false);
+  });
+
+  it('takes a held ghost or accent note at any velocity', () => {
+    const { engine } = setup(
+      {
+        measures: [measure([note(['c/5'], 480, { ghosts: ['c/5'] })])],
+      },
+      { tick: 500 },
+    );
+
+    engine.handleInput(hit('midi:38', 127));
+    expect(engine.isHit(480, 'c/5')).toBe(false);
+
+    engine.setFocus([480]);
+    engine.handleInput(hit('midi:38', 127));
+    expect(engine.isHit(480, 'c/5')).toBe(true);
+  });
+
+  it('falls back to the nearest note when no held note matches the pad', () => {
+    const { engine } = setup(
+      {
+        mapping: { snare: ['midi:38'], kick: ['midi:36'] },
+        measures: [measure([note(['f/4'], 480), note(['c/5'], 500)])],
+      },
+      { tick: 500 },
+    );
+
+    engine.setFocus([480]);
+    engine.handleInput(hit('midi:38'));
+
+    expect(engine.isHit(500, 'c/5')).toBe(true);
+    expect(engine.isHit(480, 'f/4')).toBe(false);
+  });
+
   it('skips rest notes when matching', () => {
     const { engine } = setup(
       {

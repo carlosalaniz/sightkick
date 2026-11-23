@@ -146,6 +146,7 @@ export class Engine {
   }
 
   playFromTick(tick: number): void {
+    this.judge.setFocus([]);
     this.transport.playFromTick(tick);
   }
 
@@ -157,12 +158,17 @@ export class Engine {
     this.transport.cancel();
   }
 
-  /** Wait mode: freeze playback on the spot; `release` resumes it. */
-  hold(): void {
+  /**
+   * Wait mode: freeze playback on the spot until `release`. `ticks` are the
+   * notes it waits for; a matching hit goes to them first.
+   */
+  hold(ticks: Iterable<number> = []): void {
+    this.judge.setFocus(ticks);
     this.transport.hold();
   }
 
   release(): void {
+    this.judge.setFocus([]);
     this.transport.release();
   }
 
@@ -170,7 +176,9 @@ export class Engine {
     return this.transport.isHeld;
   }
 
+  /** Also ends a hold (wait mode's run-up rewinds this way). */
   seekSeconds(seconds: number): void {
+    this.judge.setFocus([]);
     this.transport.seekSeconds(seconds);
   }
 

@@ -55,8 +55,10 @@ import {
   OffsetStats,
   offsetStats,
   TempoMeter,
+  runUpStart,
   WAIT_GRACE_OPTIONS_MS,
 } from './lesson/pace';
+import { NO_WAIT_STATS, WaitStats, WaitStatsBar } from './lesson/WaitStatsBar';
 import { TimingStrip } from './lesson/TimingStrip';
 import {
   buildSteps,
@@ -102,6 +104,16 @@ interface Toast {
 }
 
 const voicesOf = (notes: TimelineNote[]) => new Set(notes.map((n) => n.voice));
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** How far before the lesson window a run-up may start (into the bar before). */
+const RUN_UP_REACH = 2;
+/** A shorter run-up than this isn't one; the song just carries on. */
+const MIN_RUN_UP = 0.2;
+/**
+ * Run-ups into one note per pass. Still late after that, the song just carries
+ * on once you find it, rather than looping on a note you can't place yet.
+ */
+const MAX_RUN_UPS = 2;
 
 export function LessonView({ session }: { session: PlaySession }) {
   const { engine, bars, notes, pieceByVoice, timeStore, setPlaybackSpeed } =
@@ -165,10 +177,20 @@ export function LessonView({ session }: { session: PlaySession }) {
     'settings.v7.waitGraceMs',
     WAIT_GRACE_OPTIONS_MS[1],
   );
+  const [runUp, setRunUp] = usePersisted('settings.v7.runUp', true);
   /** When the current hold started (performance.now), and on which notes. */
   const hold = useRef<{ since: number; ids: Set<string> } | undefined>(
     undefined,
   );
+  /** Where a run-up rewound to, until the view sees the rewind. */
+  const runUpFrom = useRef<number | undefined>(undefined);
+  /** The notes a run-up leads into, until they're hit or held again. */
+  const runUpIds = useRef(new Set<string>());
+  /** Run-ups into each note this pass, by note id. */
+  const runUpTries = useRef(new Map<string, number>());
+  const [runUpFor, setRunUpFor] = useState<Voice[]>([]);
+  const waits = useRef({ pass: 0, streak: 0 });
+  const [waitStats, setWaitStats] = useState<WaitStats>(NO_WAIT_STATS);
   const [timing, setTiming] = useState<{ key: string; stats: OffsetStats }>({
     key: '',
     stats: { offsets: [], mean: undefined, spread: undefined },
@@ -196,6 +218,10 @@ export function LessonView({ session }: { session: PlaySession }) {
   const winNotes = useMemo(
     () => (win ? windowNotes(notes, win) : []),
     [notes, win],
+  );
+  const noteById = useMemo(
+    () => new Map(winNotes.map((n) => [n.id, n])),
+    [winNotes],
   );
   const listening = isListening(kind);
   const playable = useMemo(
@@ -390,14 +416,22 @@ export function LessonView({ session }: { session: PlaySession }) {
       names: lessons.map((l) => l.name),
       stepsFor: (i) => allSteps[i] ?? [],
     });
+    // A pass the song had to wait in says nothing about timing, so it earns
+    // no star; one it never waited in was played in time and counts.
+    const passWaits = waits.current.pass;
 
-    // Wait mode makes timing meaningless, so its passes never earn a star.
-    if (waitMode && outcome.finished?.star) {
-      outcome.finished = { ...outcome.finished, star: false };
-      outcome.message = `${outcome.message.replace(
-        /^★ /,
-        '',
-      )} (wait mode: no star)`;
+    if (waitMode && passResult) {
+      if (passWaits > 0 && outcome.finished?.star) {
+        outcome.finished = { ...outcome.finished, star: false };
+        outcome.message = `${outcome.message.replace(/^★ /, '')} (${plural(
+          passWaits,
+          'wait',
+        )}: no star)`;
+      } else {
+        outcome.message = `${outcome.message} · ${
+          passWaits > 0 ? plural(passWaits, 'wait') : 'no waits'
+        }`;
+      }
     }
 
     setState(outcome.state);
@@ -471,21 +505,39 @@ export function LessonView({ session }: { session: PlaySession }) {
 
       recordOffset(t.history, note.voice, ms);
 
-      // Live timing. After a hold, count the time you actually took, so a
-      // late hit still shows as late even though the song waited for it.
       const held = hold.current;
-      const realMs =
-        held && held.ids.has(note.id)
-          ? ms + (performance.now() - held.since) * state.speed
-          : ms;
+      const found = held?.ids.has(note.id) ?? false;
 
-      setTiming((prev) => ({
-        key: tempoKey,
-        stats: offsetStats(
-          prev.key === tempoKey ? prev.stats.offsets : [],
-          realMs,
-        ),
-      }));
+      // Live timing. After a hold, count the time you actually took, so a
+      // late hit still shows as late even though the song waited for it;
+      // with a run-up, the hit that counts is the one in the run-up.
+      if (!(found && runUp)) {
+        const realMs =
+          held && found
+            ? ms + (performance.now() - held.since) * state.speed
+            : ms;
+
+        setTiming((prev) => ({
+          key: tempoKey,
+          stats: offsetStats(
+            prev.key === tempoKey ? prev.stats.offsets : [],
+            realMs,
+          ),
+        }));
+      }
+
+      if (waitMode && !found && !next) {
+        waits.current.streak += 1;
+        setWaitStats((w) => ({
+          ...w,
+          streak: waits.current.streak,
+          best: Math.max(w.best, waits.current.streak),
+        }));
+      }
+
+      if (runUpIds.current.delete(note.id) && runUpIds.current.size === 0) {
+        setRunUpFor([]);
+      }
 
       if (!waitMode) {
         // A new tempo, step or lesson starts a fresh reading.
@@ -523,15 +575,47 @@ export function LessonView({ session }: { session: PlaySession }) {
       if (index >= 0) {
         markStaffNote(staffRef.current, index, MISS_COLOR, true);
       }
+
+      waits.current.streak = 0;
+      setWaitStats((w) => (w.streak === 0 ? w : { ...w, streak: 0 }));
     },
     onRewind: (now) => {
       const t = tracker.current;
+      const runUpTo = runUpFrom.current;
+
+      runUpFrom.current = undefined;
+
+      // A run-up: the same pass, replayed from a beat before the held note.
+      // Hits from there on are played again; the rest of the pass stands.
+      if (runUpTo !== undefined && Math.abs(now - runUpTo) < 0.25) {
+        [...t.hits.keys()].forEach((id) => {
+          if ((noteById.get(id)?.time ?? -Infinity) >= runUpTo - 1e-3) {
+            t.hits.delete(id);
+          }
+        });
+        tempoMeter.current.meter.break();
+
+        return;
+      }
+
       const complete =
         span !== undefined && isPassComplete(t.minTime, t.maxTime, span);
 
       if (complete) {
         evaluatePass();
       }
+
+      const passWaits = waits.current.pass;
+
+      waits.current.pass = 0;
+      setWaitStats((w) => ({
+        ...w,
+        waits: 0,
+        lastWaits: complete && waitMode ? passWaits : w.lastWaits,
+      }));
+      runUpIds.current.clear();
+      runUpTries.current.clear();
+      setRunUpFor([]);
 
       t.hits = complete ? t.next : new Map();
       t.next = new Map();
@@ -581,21 +665,51 @@ export function LessonView({ session }: { session: PlaySession }) {
             now,
             engine.hitTolerance,
             effectiveGrace(waitGraceMs, engine.hitTolerance),
+            hold.current?.ids,
           )
         : [];
 
     if (due.length > 0) {
       if (!hold.current) {
-        hold.current = {
-          since: performance.now(),
-          ids: new Set(due.map((n) => n.id)),
-        };
+        hold.current = { since: performance.now(), ids: new Set() };
+        waits.current.pass += 1;
+        waits.current.streak = 0;
+        setWaitStats((w) => ({ ...w, waits: waits.current.pass, streak: 0 }));
+        // Late again in a run-up: back to waiting.
+        runUpIds.current.clear();
+        setRunUpFor([]);
       }
 
-      engine.hold();
+      due.forEach((n) => hold.current?.ids.add(n.id));
+      engine.hold(due.map((n) => n.tick));
     } else {
+      const held = hold.current;
+
       if (engine.isHeld) {
-        engine.release();
+        const targets = held ? myNotes.filter((n) => held.ids.has(n.id)) : [];
+        const found =
+          targets.length > 0 &&
+          targets.every((n) => tracker.current.hits.has(n.id));
+        const first = Math.min(...targets.map((n) => n.time));
+        const key = targets[0]?.id ?? '';
+        const tries = runUpTries.current.get(key) ?? 0;
+        const from =
+          runUp && found && span && tries < MAX_RUN_UPS
+            ? runUpStart(first, bars, span.start - RUN_UP_REACH)
+            : first;
+
+        // Found the pad: now play it in time. Back up a beat and run into
+        // the note again; if it's late again, the song waits again. (Not at
+        // the very start of the song, where there's nothing to run up from.)
+        if (first - from >= MIN_RUN_UP) {
+          runUpFrom.current = from;
+          runUpTries.current.set(key, tries + 1);
+          runUpIds.current = new Set(targets.map((n) => n.id));
+          setRunUpFor(targets.map((n) => n.voice));
+          session.seekSeconds(from);
+        } else {
+          engine.release();
+        }
       }
 
       hold.current = undefined;
@@ -701,6 +815,16 @@ export function LessonView({ session }: { session: PlaySession }) {
               }))}
             />
           )}
+          {waitMode && (
+            <Checkbox
+              data-testid="run-up"
+              checked={runUp}
+              onChange={(e) => setRunUp(e.target.checked)}
+              title="Once you find the pad the song waited for, it backs up a beat so you play that note again, in time"
+            >
+              Run-up
+            </Checkbox>
+          )}
           <Checkbox
             checked={session.clickVolume > 0}
             onChange={(e) =>
@@ -727,15 +851,16 @@ export function LessonView({ session }: { session: PlaySession }) {
                 : undefined
             }
           />
-          <TempoBar
-            ratio={
-              tempoReading.key === tempoKey ? tempoReading.ratio : undefined
-            }
-            speed={state.speed}
-            note={
-              waitMode ? 'Off in wait mode: the song waits for you' : undefined
-            }
-          />
+          {waitMode ? (
+            <WaitStatsBar stats={waitStats} />
+          ) : (
+            <TempoBar
+              ratio={
+                tempoReading.key === tempoKey ? tempoReading.ratio : undefined
+              }
+              speed={state.speed}
+            />
+          )}
         </div>
       )}
       <div className="grid gap-4 grid-cols-1 min-[900px]:grid-cols-[minmax(240px,30%)_minmax(0,1fr)]">
@@ -763,6 +888,18 @@ export function LessonView({ session }: { session: PlaySession }) {
               >
                 Waiting for{' '}
                 {[...new Set(waitingFor)]
+                  .map((v) => VOICE_INFO[v].name.toLowerCase())
+                  .join(' + ')}
+              </div>
+            )}
+            {waitingFor.length === 0 && runUpFor.length > 0 && (
+              <div
+                data-testid="run-up-for"
+                className="absolute top-3 right-3 rounded-full px-3.5 py-1.5 font-semibold text-[13px] whitespace-nowrap pointer-events-none"
+                style={{ background: OK, color: '#1b1b1b' }}
+              >
+                Now in time:{' '}
+                {[...new Set(runUpFor)]
                   .map((v) => VOICE_INFO[v].name.toLowerCase())
                   .join(' + ')}
               </div>

@@ -78,8 +78,15 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   }
 
   get outputLatency(): number {
-    return this.context.outputLatency || this.context.baseLatency || 0;
+    if (this.context.outputLatency > 0) {
+      this.knownOutputLatency = this.context.outputLatency;
+    }
+
+    // Briefly 0 after a resume in Chrome: keep the last real reading.
+    return this.knownOutputLatency ?? (this.context.baseLatency || 0);
   }
+
+  private knownOutputLatency: number | undefined;
 
   private masterVolume = 1;
 
@@ -96,20 +103,23 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
 
   /**
    * Glides the output to `level` (0..1) of the master volume, so stopping and
-   * starting the audio for wait mode doesn't click.
+   * starting the audio for wait mode doesn't click. The glide starts at
+   * context time `at` if that's later than now.
    */
-  fadeTo(level: number, seconds: number): void {
+  fadeTo(level: number, seconds: number, at?: number): void {
     const { gain } = this.masterGain;
     const now = this.context.currentTime;
+    const from = Math.max(now, at ?? now);
 
     this.fadeLevel = level;
     gain.cancelScheduledValues(now);
     gain.setValueAtTime(gain.value, now);
+    gain.setValueAtTime(gain.value, from);
 
     if (seconds > 0) {
-      gain.linearRampToValueAtTime(this.masterVolume * level, now + seconds);
+      gain.linearRampToValueAtTime(this.masterVolume * level, from + seconds);
     } else {
-      gain.setValueAtTime(this.masterVolume * level, now);
+      gain.setValueAtTime(this.masterVolume * level, from);
     }
   }
 
@@ -136,19 +146,38 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
       stamp?.performanceTime && stamp.contextTime !== undefined
         ? (performance.now() - stamp.performanceTime) / 1000
         : undefined;
+    let audible: number;
 
-    // No stamp yet, or one from before a suspend: fall back to the estimate.
     if (
       stamp?.contextTime === undefined ||
       since === undefined ||
       since < 0 ||
       since > STALE_OUTPUT_STAMP_SECONDS
     ) {
-      return ctx.currentTime - this.outputLatency;
+      // No stamp yet, or one from before a suspend: estimate from the last
+      // latency a stamp showed. Just after a resume Chrome reports an
+      // outputLatency of 0 and a blank stamp, and the base latency alone put
+      // the song 50 ms ahead for a frame, then back: a stutter on every
+      // release in wait mode.
+      audible = ctx.currentTime - (this.measuredLatency ?? this.outputLatency);
+    } else {
+      audible = Math.min(stamp.contextTime + since, ctx.currentTime);
+      this.measuredLatency = ctx.currentTime - audible;
     }
 
-    return Math.min(stamp.contextTime + since, ctx.currentTime);
+    // Context time only moves forward. A fresh stamp can land a little behind
+    // the last estimate; going back would read as a rewind (and the judge
+    // drops hits on a rewind inside a loop).
+    audible = Math.max(audible, this.lastAudible);
+    this.lastAudible = audible;
+
+    return audible;
   }
+
+  /** currentTime minus the audible time, from the last fresh output stamp. */
+  private measuredLatency: number | undefined;
+
+  private lastAudible = 0;
 
   contextTimeForSongTime(songTime: number): number {
     if (this.startedAt < 0) {

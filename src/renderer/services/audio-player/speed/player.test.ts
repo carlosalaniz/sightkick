@@ -159,11 +159,12 @@ describe('SpeedAudioPlayer', () => {
     await flush();
     await player.start(4);
 
-    context.currentTime = 10;
-    expect(player.currentTime).toBeCloseTo(8.95, 5);
-
+    // A context clock only moves forward.
     context.currentTime = 0.05;
     expect(player.currentTime).toBe(4);
+
+    context.currentTime = 10;
+    expect(player.currentTime).toBeCloseTo(8.95, 5);
 
     context.currentTime = 1000;
     expect(player.currentTime).toBe(100);

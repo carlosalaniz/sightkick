@@ -146,45 +146,89 @@ describe('LessonView', () => {
     expect(calls.some(([n]) => n === 'drums')).toBe(false);
   });
 
-  it('holds playback on your next note in wait mode until it is hit', () => {
-    const { session, engine, timeStore, hit } = makeSession({
-      isPlaying: true,
+  /** Holds on the hi-hat + kick chord at `at` s, then hits it. */
+  const holdChord = (runUp: boolean, at = 0) => {
+    localStorage.setItem('settings.v7.runUp', JSON.stringify(runUp));
+
+    const ctx = makeSession({ isPlaying: true });
+
+    // A seek (the run-up) ends the hold.
+    vi.mocked(ctx.session.seekSeconds).mockImplementation(() => {
+      ctx.engine.isHeld = false;
     });
 
-    render(<LessonView session={session} />);
+    render(<LessonView session={ctx.session} />);
     fireEvent.click(screen.getByText('3 · Hi-hat + kick'));
     fireEvent.click(screen.getByTestId('wait-mode'));
 
-    const first = notes
-      .filter((n) => n.voice === 'hihat' || n.voice === 'kick')
-      .sort((a, b) => a.time - b.time)[0];
+    const mineSoFar = notes.filter(
+      (n) => (n.voice === 'hihat' || n.voice === 'kick') && n.time <= at,
+    );
+    const first = mineSoFar.find((n) => n.time === at)!;
+
+    // Everything before it was played in time.
+    mineSoFar
+      .filter((n) => n.time < at)
+      .forEach((n) =>
+        ctx.hit({ tick: n.tick, prefixes: [n.prefix], offsetSeconds: 0 }),
+      );
+
     const chord = notes.filter(
       (n) => n.tick === first.tick && ['hihat', 'kick'].includes(n.voice),
     );
 
     // Inside the 60 ms grace the song keeps going.
-    playThrough(timeStore, first.time - 0.1, first.time + 0.02);
+    playThrough(ctx.timeStore, first.time - 0.1, first.time + 0.055);
 
-    expect(engine.hold).not.toHaveBeenCalled();
+    expect(ctx.engine.hold).not.toHaveBeenCalled();
 
-    playThrough(timeStore, first.time + 0.02, first.time + 0.05);
+    playThrough(ctx.timeStore, first.time + 0.06, first.time + 0.09);
 
-    expect(engine.hold).toHaveBeenCalled();
+    expect(ctx.engine.hold).toHaveBeenCalled();
     expect(screen.getByTestId('waiting-for')).toHaveTextContent('Waiting for');
+    expect(screen.getByTestId('wait-count')).toHaveTextContent('1');
 
-    engine.isHeld = true;
+    ctx.engine.isHeld = true;
+
+    const releasesBefore = ctx.engine.release.mock.calls.length;
+
     chord.forEach((n) =>
-      hit({ tick: n.tick, prefixes: [n.prefix], offsetSeconds: 0 }),
+      ctx.hit({ tick: n.tick, prefixes: [n.prefix], offsetSeconds: 0 }),
     );
-    playThrough(timeStore, first.time + 0.05, first.time + 0.07);
+    playThrough(ctx.timeStore, first.time + 0.09, first.time + 0.12);
 
-    expect(engine.release).toHaveBeenCalled();
+    return {
+      ...ctx,
+      first,
+      released: ctx.engine.release.mock.calls.length > releasesBefore,
+    };
+  };
+
+  it('holds playback on your next note in wait mode until it is hit', () => {
+    const { released, session } = holdChord(false);
+
+    expect(released).toBe(true);
+    expect(session.seekSeconds).not.toHaveBeenCalled();
     expect(screen.queryByTestId('waiting-for')).toBeNull();
     expect(screen.getByTestId('timing-strip')).toBeInTheDocument();
-    expect(screen.getByTestId('tempo-bar')).toHaveAttribute(
-      'data-verdict',
-      'off',
-    );
+    expect(screen.getByTestId('wait-stats')).toBeInTheDocument();
+    expect(screen.queryByTestId('tempo-bar')).toBeNull();
+  });
+
+  it('backs up a beat after a hold so the note is played again in time', () => {
+    // Beat 3 of the first bar: the run-up starts on beat 2.
+    const { released, session } = holdChord(true, 1);
+
+    expect(released).toBe(false);
+    expect(session.seekSeconds).toHaveBeenCalledWith(0.5);
+    expect(screen.getByTestId('run-up-for')).toHaveTextContent('Now in time');
+  });
+
+  it('just carries on when there is no room for a run-up', () => {
+    const { released, session } = holdChord(true, 0);
+
+    expect(released).toBe(true);
+    expect(session.seekSeconds).not.toHaveBeenCalled();
   });
 
   it('lets the player change the tempo', () => {

@@ -1,25 +1,27 @@
-import { TimelineNote } from '../../../../kit';
-
-/**
- * Wait mode holds playback a little before its hold point, so the freeze
- * (which lands a frame or two late) still stops on time.
- */
-export const WAIT_LEAD_SECONDS = 0.02;
+import { TimelineBar, TimelineNote } from '../../../../kit';
 
 /** Grace choices for wait mode, in ms; the default is the middle one. */
 export const WAIT_GRACE_OPTIONS_MS = [30, 60, 90] as const;
 
-/** Grace actually used: never so late that a held note can't be judged. */
+/**
+ * Grace actually used: never so late that the hold (which freezes the song a
+ * frame or two after it starts) lands outside the note's hit window.
+ */
 export function effectiveGrace(graceMs: number, toleranceSeconds: number) {
   return Math.max(0, Math.min(graceMs / 1000, toleranceSeconds - 0.03));
 }
+
+/** How far back a note being held for still holds (past that, a seek). */
+const HOLD_REACH = 0.5;
 
 /**
  * The notes wait mode is holding for at `now`: the earliest unhit notes (all
  * voices at that tick) that are more than `grace` late. Hitting within the
  * grace never stops the song, so it plays on naturally. Notes further back
  * than the hit window were missed before wait mode could catch them (e.g.
- * it was just switched on) and are skipped.
+ * it was just switched on) and are skipped, except the ones it is already
+ * `holding` for: the song stopped for those, so it waits for them however
+ * late the freeze landed.
  */
 export function dueNotes(
   notes: TimelineNote[],
@@ -27,15 +29,15 @@ export function dueNotes(
   now: number,
   tolerance: number,
   grace = 0,
-  lead = WAIT_LEAD_SECONDS,
+  holding: ReadonlySet<string> = new Set(),
 ): TimelineNote[] {
   let tick: number | undefined;
   const due: TimelineNote[] = [];
 
   for (const note of notes) {
     if (
-      note.time + grace - lead > now ||
-      note.time < now - tolerance ||
+      note.time + grace > now ||
+      note.time < now - (holding.has(note.id) ? HOLD_REACH : tolerance) ||
       hit(note)
     ) {
       continue;
@@ -52,6 +54,43 @@ export function dueNotes(
   }
 
   return due;
+}
+
+/**
+ * Where a run-up to a held note starts: the last beat at least 3/4 of a beat
+ * before it, so after finding the pad you play the note again, in time, with
+ * a beat of the song leading into it. Never before `floor`.
+ */
+export function runUpStart(
+  noteTime: number,
+  bars: TimelineBar[],
+  floor = -Infinity,
+): number {
+  const beats = bars.flatMap((b) => b.beats);
+  const lastAtOrBefore = (time: number) => {
+    let found = -1;
+
+    beats.forEach((b, i) => {
+      if (b <= time + 1e-6) {
+        found = i;
+      }
+    });
+
+    return found;
+  };
+  const at = lastAtOrBefore(noteTime);
+
+  if (at < 0) {
+    return Math.max(floor, noteTime);
+  }
+
+  const beat =
+    (beats[at + 1] ?? bars.find((b) => b.end > beats[at])?.end ?? noteTime) -
+    beats[at];
+  const lead = noteTime - 0.75 * (beat > 0 ? beat : 0.5);
+  const start = beats[Math.max(0, lastAtOrBefore(lead))];
+
+  return Math.max(floor, Math.min(start, noteTime));
 }
 
 /** How many recent hits the live timing strip shows. */
