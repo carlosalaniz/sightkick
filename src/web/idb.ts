@@ -1,20 +1,55 @@
+import { log } from '../shared/log';
+
 // Minimal promise wrapper around one IndexedDB object store used as a
 // key/value map. Values must be structured-cloneable (directory handles are).
 
 const DB_NAME = 'sightkick';
+const DB_VERSION = 1;
 const STORE = 'kv';
 let dbPromise: Promise<IDBDatabase> | undefined;
 
+function forgetDb(): void {
+  dbPromise = undefined;
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
+    const opening = new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onupgradeneeded = () => {
         request.result.createObjectStore(STORE);
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+
+        // Another tab upgrading the database waits for this connection to
+        // close; close it and reopen on the next call rather than block it.
+        db.onversionchange = () => {
+          db.close();
+          forgetDb();
+        };
+        // The browser closed it (storage cleared, disk error): reopen next time.
+        db.onclose = forgetDb;
+        resolve(db);
+      };
       request.onerror = () => reject(request.error);
+      // Another tab still has an older version open. The open goes through
+      // once that tab closes it, so keep waiting, but leave a trace.
+      request.onblocked = () => {
+        log.warn('idb.open_blocked', { db: DB_NAME, version: DB_VERSION });
+      };
+    });
+
+    dbPromise = opening;
+    // A failed open isn't cached: the next call tries again instead of every
+    // read failing until the page reloads.
+    opening.catch((error: unknown) => {
+      log.error('idb.open_failed', { db: DB_NAME }, error);
+
+      if (dbPromise === opening) {
+        forgetDb();
+      }
     });
   }
 
