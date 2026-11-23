@@ -595,3 +595,11 @@ def test_cancels_and_refused_requests_are_logged(client, lib, events):
     assert outcomes == {queued["id"]: "cancelled", running["id"]: "cancelled"}
     rejected = [e for e in events if e["event"] == "request_rejected"]
     assert [(e["status"], e["code"]) for e in rejected] == [(400, "bad_request")]
+
+
+def test_the_backing_mix_can_be_switched_off(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "BACKING_ENABLED", False)
+    lib.stems = ["Drums", "Bass", "Vocals", "Other"]
+    job = wait_done(client, post(client, wav_bytes(2500))["id"])
+    assert job["stems"] == ["bass", "drums", "song", "vocals"]
+    assert post(client, wav_bytes(2500))["stems"] == ["bass", "drums", "song", "vocals"]

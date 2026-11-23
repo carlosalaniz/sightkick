@@ -85,6 +85,9 @@ JANITOR_INTERVAL_SECONDS = 60
 # Finished splits, kept forever. Set SK_CACHE=0 to turn the cache off.
 CACHE_DIR = Path(os.environ.get("SK_CACHE_DIR", Path.home() / ".cache" / "sightkick-stem-cache"))
 CACHE_ENABLED = os.environ.get("SK_CACHE", "1") != "0"
+# Set SK_BACKING=0 to stop mixing the backing track (see BACKING below), for
+# new splits and for old cache entries alike. Entries that have one keep it.
+BACKING_ENABLED = os.environ.get("SK_BACKING", "1") != "0"
 # Bump when a change here alters the stems a model produces (decoding, model
 # parameters, naming), so old cache entries stop matching.
 CACHE_VERSION = 1
@@ -469,7 +472,7 @@ def encode(job: Job, named: list[tuple[str, Path]], span: tuple[float, float]) -
                  "-c:a", "libvorbis", "-q:a", OGG_QUALITY, str(ogg)])
         job.stems[name] = ogg
     # One instrument stem is its own backing; mixing only pays off from two.
-    if len(backing_parts) >= 2:
+    if BACKING_ENABLED and len(backing_parts) >= 2:
         backing = job.dir / f"{BACKING}.ogg"
         try:
             mix_backing(backing_parts, backing)
@@ -525,7 +528,7 @@ def ensure_backing(key: str, stems: dict[str, Path]) -> dict[str, Path]:
     old entries gain it without splitting again. Best effort: on failure the
     entry is served as it was."""
     parts = [path for name, path in sorted(stems.items()) if is_backing_part(name)]
-    if BACKING in stems or len(parts) < 2:
+    if not BACKING_ENABLED or BACKING in stems or len(parts) < 2:
         return stems
     entry = cache_entry(key)
     token = uuid.uuid4().hex

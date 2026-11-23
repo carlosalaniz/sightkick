@@ -77,6 +77,7 @@ Bump `CACHE_VERSION` in `app.py` when a code change alters what a model produces
 | `SK_FFMPEG_TIMEOUT_SECONDS` | `600` | Longest one ffmpeg decode, encode or mix may run before it's killed |
 | `SK_CACHE_DIR` | `/cache` in Docker, else `~/.cache/sightkick-stem-cache` | Where finished splits are cached |
 | `SK_CACHE` | `1` | Set to `0` to turn the cache off |
+| `SK_BACKING` | `1` | Set to `0` to stop making the `backing` mix, for new splits and old cache entries; entries that already have one still return it |
 | `SK_ALLOWED_ORIGINS` | `*` | CORS origins, comma-separated |
 
 Stem names follow Clone Hero: the model's `piano` becomes `keys` and `other` becomes `song`.
