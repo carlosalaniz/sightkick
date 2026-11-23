@@ -3,7 +3,7 @@ kind: Application
 metadata:
   id: sightkick
   name: "SightKick"
-  description: "Drum practice with sheet music: plays Clone Hero charts as notation, listens to your e-kit over MIDI and scores your playing. Includes a stem server that splits songs so you can mute the drums."
+  description: "Drum practice with sheet music: plays Clone Hero charts as notation, listens to your e-kit over MIDI and scores your playing. Includes a stem server that splits songs so you can mute the drums. Use Chrome or Edge; it has no login of its own."
 release:
   revision: "1"
   version: "0.1.0"
@@ -33,9 +33,9 @@ health:
   deadlineSeconds: 120
 ui:
   primaryEndpoint: web
-setup:
-  endpoint: web
-  instructions: "Open SightKick in Chrome or Edge, search for a song and download it. To mute the drums on a song with a single audio file, open its menu and choose Split stems: the first split of a song takes a few minutes on the CPU, and every later request for the same audio is instant. Splitting has no login of its own, so turn on Harbor's app login before publishing SightKick on the internet."
+# No setup block: Harbor reads `setup` as "the first visitor creates an account", and
+# SightKick has no accounts. It has no login either, so put Harbor's app login in front
+# of it before publishing it on the internet (harbor app-login sightkick on).
 storage:
   - id: models
     composeVolume: models
