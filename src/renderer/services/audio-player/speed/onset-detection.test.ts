@@ -53,4 +53,21 @@ describe('detectOnsets', () => {
 
     expect(detectOnsets(closeSignal, SAMPLE_RATE).length).toBe(1);
   });
+
+  it('finds the same onsets in 16-bit stereo as in its float mono mix', () => {
+    const left = new Float32Array(12000);
+    const right = new Float32Array(12000);
+
+    burst(left, 2000, 512, 0.6);
+    burst(right, 8000, 512, 0.9);
+
+    const mono = left.map((v, i) => (v + right[i]) / 2);
+    const toInt16 = (a: Float32Array) =>
+      Int16Array.from(a, (v) => Math.round(v * 32768));
+
+    expect(detectOnsets([toInt16(left), toInt16(right)], SAMPLE_RATE)).toEqual(
+      detectOnsets(mono, SAMPLE_RATE),
+    );
+    expect(detectOnsets(mono, SAMPLE_RATE)).toHaveLength(2);
+  });
 });

@@ -79,6 +79,30 @@ afterEach(() => {
 });
 
 describe('SpeedAudioPlayer', () => {
+  it('stretches drums and kit pieces as drums and everything else smoothly', async () => {
+    const player = new SpeedAudioPlayer(
+      [
+        { name: 'kick', urls: ['k.ogg'] },
+        { name: 'snare', urls: ['s.ogg'] },
+        { name: 'drums', urls: ['d.ogg'] },
+        { name: 'backing', urls: ['b.ogg'] },
+      ],
+      vi.fn(),
+    );
+
+    await player.ready;
+    await flush();
+
+    const groups = streams[0].init.mock.calls[0][2] as { kind: string }[];
+
+    expect(groups.map((g) => g.kind)).toEqual([
+      'transient',
+      'transient',
+      'transient',
+      'vocoder',
+    ]);
+  });
+
   it('initialises the stream with one voice per channel and the speed', async () => {
     const { stream } = await makePlayer();
 

@@ -1,7 +1,7 @@
 import { ChannelStretcher } from './channel-stretcher';
 import { detectOnsets } from './onset-detection';
 import { SampleBlock } from '../types';
-import { PcmChannel, pcmScale } from './pcm';
+import { PcmChannel } from './pcm';
 
 export type VoiceKind = 'vocoder' | 'transient';
 
@@ -15,27 +15,6 @@ export interface StretchUnit {
   channelIndices: number[];
   seek(outputSample: number): void;
   produce(frames: number): SampleBlock[];
-}
-
-function mixToMono(channels: PcmChannel[]): Float32Array {
-  const [first] = channels;
-
-  if (channels.length === 1 && first instanceof Float32Array) {
-    return first;
-  }
-
-  const length = first.length;
-  const mono = new Float32Array(length);
-
-  for (const channel of channels) {
-    const scale = pcmScale(channel) / channels.length;
-
-    for (let i = 0; i < length; i += 1) {
-      mono[i] += channel[i] * scale;
-    }
-  }
-
-  return mono;
 }
 
 function getOrComputeOnsets(
@@ -72,7 +51,7 @@ export function buildUnits(
       group.kind === 'transient'
         ? getOrComputeOnsets(onsetsByGroup, groupIndex, () =>
             detectOnsets(
-              mixToMono(channelIndices.map((index) => channels[index])),
+              channelIndices.map((index) => channels[index]),
               sampleRate,
             ),
           )

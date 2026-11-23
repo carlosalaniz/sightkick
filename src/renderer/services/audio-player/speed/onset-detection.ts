@@ -1,11 +1,24 @@
+import { PcmChannel, pcmScale } from './pcm';
+
 const FRAME_SIZE = 1024;
 const HOP = 512;
 const MIN_IOI_SECONDS = 0.04;
 const THRESHOLD_MULTIPLIER = 1.6;
 const THRESHOLD_WINDOW = 8;
 
-export function detectOnsets(mono: Float32Array, sampleRate: number): number[] {
-  const frameCount = Math.floor((mono.length - FRAME_SIZE) / HOP) + 1;
+/**
+ * Sample offsets where a hit starts, from the energy of the channels' mono
+ * mix. The mix is formed frame by frame rather than as a copy of the track,
+ * which for a 4-minute song would be another 46 MB per drum track.
+ */
+export function detectOnsets(
+  input: PcmChannel | PcmChannel[],
+  sampleRate: number,
+): number[] {
+  const channels = Array.isArray(input) ? input : [input];
+  const scales = channels.map((c) => pcmScale(c) / channels.length);
+  const length = channels[0]?.length ?? 0;
+  const frameCount = Math.floor((length - FRAME_SIZE) / HOP) + 1;
 
   if (frameCount <= 2) {
     return [];
@@ -19,7 +32,11 @@ export function detectOnsets(mono: Float32Array, sampleRate: number): number[] {
     let energy = 0;
 
     for (let i = 0; i < FRAME_SIZE; i += 1) {
-      const sample = mono[start + i];
+      let sample = 0;
+
+      for (let c = 0; c < channels.length; c += 1) {
+        sample += channels[c][start + i] * scales[c];
+      }
 
       energy += sample * sample;
     }

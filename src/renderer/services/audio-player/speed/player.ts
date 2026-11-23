@@ -3,6 +3,7 @@ import { StretchStream } from './stretch-stream';
 import { VoiceGroup } from './build-units';
 import { SYNTHESIS_HOP } from './channel-stretcher';
 import { PcmChannel } from './pcm';
+import { DRUM_KIT_PIECES } from '../../../../songData';
 import { BaseAudioPlayer } from '../base-player';
 import {
   LoopWindow,
@@ -15,7 +16,12 @@ const FRAMES_PER_CHUNK = 64;
 const LOOKAHEAD_SECONDS = 2;
 const SCHEDULER_INTERVAL_MS = 100;
 const START_LEAD_SECONDS = 0.1;
-const DRUM_TRACK_NAME = 'drums';
+const DRUM_TRACK_NAMES: readonly string[] = ['drums', ...DRUM_KIT_PIECES];
+/**
+ * Drums and the kit pieces split from them are stretched with their hits kept
+ * sharp (phase reset at each onset); everything else as a smooth vocoder.
+ */
+const isDrumTrack = (name: string) => DRUM_TRACK_NAMES.includes(name);
 
 interface ChunkTarget {
   track: SpeedAudioTrack;
@@ -180,7 +186,7 @@ export class SpeedAudioPlayer
         this.groups.push({
           start: voiceStart,
           count: channels,
-          kind: track.name === DRUM_TRACK_NAME ? 'transient' : 'vocoder',
+          kind: isDrumTrack(track.name) ? 'transient' : 'vocoder',
         });
       });
     });
