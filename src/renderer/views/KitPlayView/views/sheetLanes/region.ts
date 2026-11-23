@@ -1,4 +1,8 @@
-import { TimelineBar, TimelineNote } from '../../../../kit';
+import {
+  lastIndexAtOrBefore,
+  TimelineBar,
+  TimelineNote,
+} from '../../../../kit';
 import { barRangeLabel, prettySectionName } from '../shared/sections';
 
 /** Bars per practice window (the mock's 4-bar groove). */
@@ -226,20 +230,13 @@ export function loopBeatAt(model: LoopModel, t: number): number {
     );
   }
 
-  let lo = 0;
-  let hi = bars.length - 1;
-
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1;
-
-    if (bars[mid].bar.start <= t) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
-
-  const lb = bars[lo];
+  const lb =
+    bars[
+      Math.max(
+        0,
+        lastIndexAtOrBefore(bars, t, (b) => b.bar.start),
+      )
+    ];
   const { beats } = lb.bar;
   let i = 0;
 

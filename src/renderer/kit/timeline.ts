@@ -127,3 +127,28 @@ export function firstNoteAtOrAfter(notes: TimelineNote[], t: number): number {
 
   return lo;
 }
+
+/**
+ * Index of the last item whose key is at or before `t`, or -1 if none
+ * (binary search; `items` sorted by `keyOf`).
+ */
+export function lastIndexAtOrBefore<T>(
+  items: readonly T[],
+  t: number,
+  keyOf: (item: T) => number,
+): number {
+  let lo = 0;
+  let hi = items.length;
+
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+
+    if (keyOf(items[mid]) <= t) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+
+  return lo - 1;
+}

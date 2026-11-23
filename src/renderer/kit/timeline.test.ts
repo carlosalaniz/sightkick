@@ -4,6 +4,7 @@ import {
   buildBarTimeline,
   buildNoteTimeline,
   firstNoteAtOrAfter,
+  lastIndexAtOrBefore,
 } from './timeline';
 
 const CHART = {
@@ -97,5 +98,23 @@ describe('firstNoteAtOrAfter', () => {
     expect(firstNoteAtOrAfter(notes, 0.25)).toBe(1);
     expect(firstNoteAtOrAfter(notes, 0.5)).toBe(1);
     expect(firstNoteAtOrAfter(notes, 9)).toBe(3);
+  });
+});
+
+describe('lastIndexAtOrBefore', () => {
+  const starts = [0, 2, 2, 5];
+  const at = (t: number) => lastIndexAtOrBefore(starts, t, (x) => x);
+
+  it('finds the last item starting at or before t', () => {
+    expect(at(0)).toBe(0);
+    expect(at(1.9)).toBe(0);
+    expect(at(2)).toBe(2);
+    expect(at(4)).toBe(2);
+    expect(at(99)).toBe(3);
+  });
+
+  it('is -1 before the first item or for an empty list', () => {
+    expect(at(-1)).toBe(-1);
+    expect(lastIndexAtOrBefore([], 3, (x: number) => x)).toBe(-1);
   });
 });

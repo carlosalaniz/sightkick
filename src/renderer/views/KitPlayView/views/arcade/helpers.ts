@@ -6,6 +6,7 @@ import {
   controlsForPiece,
   Kit,
   KitPiece,
+  lastIndexAtOrBefore,
   TimelineBar,
   TimelineNote,
   Voice,
@@ -91,38 +92,18 @@ export function buildSections(
 
 /** Index of the section playing at `time` (clamped to the first / last). */
 export function sectionIndexAt(sections: SongSection[], time: number): number {
-  let lo = 0;
-  let hi = sections.length - 1;
-
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1;
-
-    if (sections[mid].start <= time) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
-
-  return Math.max(0, lo);
+  return Math.max(
+    0,
+    lastIndexAtOrBefore(sections, time, (s) => s.start),
+  );
 }
 
 /** Index of the bar playing at `time` (clamped). */
 export function barIndexAt(bars: TimelineBar[], time: number): number {
-  let lo = 0;
-  let hi = bars.length - 1;
-
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >>> 1;
-
-    if (bars[mid].start <= time) {
-      lo = mid;
-    } else {
-      hi = mid - 1;
-    }
-  }
-
-  return Math.max(0, lo);
+  return Math.max(
+    0,
+    lastIndexAtOrBefore(bars, time, (b) => b.start),
+  );
 }
 
 /** Length of one beat at `time`, in seconds. */
