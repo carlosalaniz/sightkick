@@ -343,6 +343,28 @@ export function skippedLine(skipped: { names: string[]; count: number }) {
 
 export const isCymbalVoice = (v: Voice) => VOICE_INFO[v].cymbal;
 
+/**
+ * Gems on the Lanes and Rails highways, in fractions of the look-ahead:
+ * drawn out to 1.05 (a little past the far edge so they slide in), faded
+ * in over the last 0.12 before that edge and out over 0.12 past the hit
+ * line. A missed gem stays at 0.3 so the player sees what was missed.
+ */
+export const LANE_GEM_FAR = 1.05;
+
+export const LANE_GEM_FADE = 0.12;
+
+export const MISSED_LANE_GEM_OPACITY = 0.3;
+
+/** Opacity of an unhit lane gem at `t` look-aheads before its note (negative after). */
+export function laneGemOpacity(t: number, missed: boolean): number {
+  const fadeIn = clamp01((LANE_GEM_FAR - t) / LANE_GEM_FADE);
+  const fadeOut = t < 0 ? clamp01(1 + t / LANE_GEM_FADE) : 1;
+
+  return fadeIn * fadeOut * (missed ? MISSED_LANE_GEM_OPACITY : 1);
+}
+
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+
 /** Deterministic pseudo-random in [0, 1) per integer seed (demo autoplay jitter). */
 export function hash01(seed: number): number {
   let x = (seed | 0) ^ 0x9e3779b9;

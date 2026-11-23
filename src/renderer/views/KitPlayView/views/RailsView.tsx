@@ -20,6 +20,9 @@ import {
 } from './arcade/fx';
 import {
   forEachBeat,
+  LANE_GEM_FADE,
+  LANE_GEM_FAR,
+  laneGemOpacity,
   poolSizes,
   sectionIndexAt,
   songProgress,
@@ -132,9 +135,9 @@ export function RailsView({ session }: { session: PlaySession }) {
   const RT = 3.6 * GS;
   const laneY = new Map(hands.map((p, i) => [p.id, Y0 + (i + 0.5) * LW]));
   const look = BASE_LOOK * arcade.lookFactor;
-  const trail = 0.12 * look;
+  const trail = LANE_GEM_FADE * look;
   const sizes = useMemo(
-    () => poolSizes(notes, pieceByVoice, trail, look * 1.05),
+    () => poolSizes(notes, pieceByVoice, trail, look * LANE_GEM_FAR),
     [notes, pieceByVoice, trail, look],
   );
   const kx = (x: number) => KX + x * KS;
@@ -154,7 +157,7 @@ export function RailsView({ session }: { session: PlaySession }) {
 
     for (
       let i = firstNoteAtOrAfter(notes, now - trail);
-      i < notes.length && notes[i].time <= now + look * 1.05;
+      i < notes.length && notes[i].time <= now + look * LANE_GEM_FAR;
       i += 1
     ) {
       const note = notes[i];
@@ -166,10 +169,7 @@ export function RailsView({ session }: { session: PlaySession }) {
       }
 
       const t = (note.time - now) / look;
-      const o =
-        clamp((1.05 - t) / 0.12) *
-        (t < 0 ? clamp(1 + t / 0.12) : 1) *
-        (gem === 'missed' ? 0.3 : 1);
+      const o = laneGemOpacity(t, gem === 'missed');
       const x = (XH + (W - XH) * t).toFixed(2);
 
       if (piece === kick) {

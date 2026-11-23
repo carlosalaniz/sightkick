@@ -44,6 +44,9 @@ export type NoteSpeedId = (typeof NOTE_SPEEDS)[number]['id'];
 /** Click volume when the Click box is on. */
 export const CLICK_ON = 0.6;
 
+/** Song speed a section's Practice button loops it at. */
+export const PRACTICE_SPEED = 0.7;
+
 /** Fever lasts this many beats (2 bars of 4/4). */
 const FEVER_BEATS = 8;
 
@@ -268,7 +271,7 @@ export function useArcade(
     reset();
     setLoopIdx(idx);
     session.setLoopRegion({ startTick: sec.startTick, endTick: sec.endTick });
-    session.setPlaybackSpeed(0.7);
+    session.setPlaybackSpeed(PRACTICE_SPEED);
     session.playFromTick(sec.startTick);
   };
   const lookFactor =

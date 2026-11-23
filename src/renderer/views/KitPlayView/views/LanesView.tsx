@@ -20,6 +20,9 @@ import {
 } from './arcade/fx';
 import {
   forEachBeat,
+  LANE_GEM_FADE,
+  LANE_GEM_FAR,
+  laneGemOpacity,
   poolSizes,
   sectionIndexAt,
   songProgress,
@@ -160,9 +163,9 @@ export function LanesView({ session }: { session: PlaySession }) {
   const kx = (x: number) => KX + x * KS;
   const ky = (y: number) => geo.ky0 + y * KS;
   const look = BASE_LOOK * arcade.lookFactor;
-  const trail = 0.12 * look;
+  const trail = LANE_GEM_FADE * look;
   const sizes = useMemo(
-    () => poolSizes(notes, pieceByVoice, trail, look * 1.05),
+    () => poolSizes(notes, pieceByVoice, trail, look * LANE_GEM_FAR),
     [notes, pieceByVoice, trail, look],
   );
   const register = (id: string, el: Element | null) => pools.register(id, el);
@@ -180,7 +183,7 @@ export function LanesView({ session }: { session: PlaySession }) {
 
     for (
       let i = firstNoteAtOrAfter(notes, now - trail);
-      i < notes.length && notes[i].time <= now + look * 1.05;
+      i < notes.length && notes[i].time <= now + look * LANE_GEM_FAR;
       i += 1
     ) {
       const note = notes[i];
@@ -192,10 +195,7 @@ export function LanesView({ session }: { session: PlaySession }) {
       }
 
       const t = (note.time - now) / look;
-      const o =
-        clamp((1.05 - t) / 0.12) *
-        (t < 0 ? clamp(1 + t / 0.12) : 1) *
-        (gem === 'missed' ? 0.3 : 1);
+      const o = laneGemOpacity(t, gem === 'missed');
       const y = (YS - (YS - YT) * t).toFixed(2);
 
       if (piece === kick) {

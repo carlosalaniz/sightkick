@@ -25,6 +25,10 @@ import {
   songProgress,
   spreadPositions,
   staffStep,
+  LANE_GEM_FADE,
+  LANE_GEM_FAR,
+  laneGemOpacity,
+  MISSED_LANE_GEM_OPACITY,
 } from './helpers';
 import { pageStartFor } from './SheetStrip';
 
@@ -283,5 +287,15 @@ describe('pageStartFor', () => {
     expect(pageStartFor(9, 6)).toBe(6);
     expect(pageStartFor(10, 6)).toBe(10);
     expect(pageStartFor(2, 6)).toBe(6);
+  });
+});
+
+describe('laneGemOpacity', () => {
+  it('fades in at the far edge, out past the hit line, and dims misses', () => {
+    expect(laneGemOpacity(LANE_GEM_FAR, false)).toBe(0);
+    expect(laneGemOpacity(0.5, false)).toBe(1);
+    expect(laneGemOpacity(-LANE_GEM_FADE / 2, false)).toBeCloseTo(0.5);
+    expect(laneGemOpacity(-LANE_GEM_FADE, false)).toBe(0);
+    expect(laneGemOpacity(0.5, true)).toBe(MISSED_LANE_GEM_OPACITY);
   });
 });

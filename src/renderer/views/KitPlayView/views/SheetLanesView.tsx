@@ -122,6 +122,16 @@ const MOTIONS: { value: Motion; label: string }[] = [
   { value: 'page', label: 'Page' },
 ];
 const EMPTY_PROGRESS: SongProgress = { probes: [] };
+/** Unseen-bars passes kept in Reading progress, newest first. */
+const MAX_LOGGED_PROBES = 8;
+/** Audio time going back more than this is a jump (wrap or seek), not jitter. */
+const BACKWARD_JUMP_SECONDS = 0.05;
+/**
+ * A jump from within this of the loop end to within this of the loop start
+ * is the loop wrapping; a jump that lands this close to the start also
+ * counts as starting the pass from the top.
+ */
+const WRAP_EDGE_SECONDS = 0.3;
 const prefersReducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -519,7 +529,7 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
               tempo,
             },
             ...prev.probes,
-          ].slice(0, 8),
+          ].slice(0, MAX_LOGGED_PROBES),
         },
       };
     });
@@ -576,11 +586,14 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
     strip.current?.clearMarks(r.pass + 1);
     r.results.delete(r.pass);
     r.results.delete(r.pass + 1);
-    r.passFrom = now <= model.start + 0.3 ? -Infinity : now;
+    r.passFrom = now <= model.start + WRAP_EDGE_SECONDS ? -Infinity : now;
     r.score = 0;
 
     // A seek into the middle of an unseen-bars pass spoils it.
-    if (modeRef.current === 'unseenProbe' && now > model.start + 0.3) {
+    if (
+      modeRef.current === 'unseenProbe' &&
+      now > model.start + WRAP_EDGE_SECONDS
+    ) {
       setMode('practice');
       r.levels = initialLevels(guideRef.current, r.levels.length);
       setSpacing(laneSpacing(r.levels));
@@ -595,11 +608,11 @@ export function SheetLanesView({ session }: { session: PlaySession }) {
       return;
     }
 
-    if (now < r.lastTime - 0.05) {
+    if (now < r.lastTime - BACKWARD_JUMP_SECONDS) {
       const wrapped =
         r.wasPlaying &&
-        r.lastTime >= model.end - 0.3 &&
-        now <= model.start + 0.3;
+        r.lastTime >= model.end - WRAP_EDGE_SECONDS &&
+        now <= model.start + WRAP_EDGE_SECONDS;
 
       if (wrapped) {
         endPass();
