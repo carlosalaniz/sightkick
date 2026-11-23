@@ -8,7 +8,7 @@ import {
 import { usePersisted } from '../hooks/usePersisted';
 import { DEFAULT_KITS } from './constants';
 import { KitDefs } from './KitSvg';
-import { KitState } from './storedKits';
+import { KitState, parseKitState } from './storedKits';
 import { Kit } from './types';
 
 interface KitContextValue {
@@ -27,7 +27,11 @@ const INITIAL: KitState = { kits: DEFAULT_KITS, currentId: DEFAULT_KITS[0].id };
 const KitContext = createContext<KitContextValue | null>(null);
 
 export function KitProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = usePersisted<KitState>(STORAGE_KEY, INITIAL);
+  const [state, setState] = usePersisted<KitState>(
+    STORAGE_KEY,
+    INITIAL,
+    parseKitState,
+  );
   const kits = state.kits.length > 0 ? state.kits : DEFAULT_KITS;
   const kit = kits.find((k) => k.id === state.currentId) ?? kits[0];
   const selectKit = useCallback(

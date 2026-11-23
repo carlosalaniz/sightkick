@@ -106,6 +106,7 @@ import {
   windowNotes,
   windowSpan,
 } from './lesson/windows';
+import { DRUM_STEM } from '../../../../songData';
 
 const EMPTY_PROGRESS: SongProgress = { stars: {}, seen: {} };
 const DEFAULT_CLICK = 0.6;
@@ -324,7 +325,7 @@ export function LessonView({ session }: { session: PlaySession }) {
     const pieces = Object.keys(gains);
 
     if (pieces.length === 0) {
-      setStemScale('drums', stemGain);
+      setStemScale(DRUM_STEM, stemGain);
 
       return undefined;
     }
@@ -336,7 +337,7 @@ export function LessonView({ session }: { session: PlaySession }) {
 
   useEffect(
     () => () => {
-      setStemScale('drums', 1);
+      setStemScale(DRUM_STEM, 1);
       kitStems.forEach((piece) => setStemScale(piece, 1));
     },
     [setStemScale, kitStems],
