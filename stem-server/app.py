@@ -25,6 +25,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -59,6 +60,18 @@ MODEL_DIR = os.environ.get("SK_MODEL_DIR", "/models")
 WORK_DIR = Path(os.environ.get("SK_WORK_DIR", Path(tempfile.gettempdir()) / "sightkick-stems"))
 MAX_UPLOAD_MB = int(os.environ.get("SK_MAX_UPLOAD_MB", "200"))
 JOB_TTL_SECONDS = int(os.environ.get("SK_JOB_TTL_SECONDS", "3600"))
+# Longest a job may run, including a first-use model download (Best is about
+# 700 MB) and a stems+kit pass on the CPU. Past it the job stops at the model's
+# next chunk and ends with errorCode "timed_out".
+JOB_TIMEOUT_SECONDS = float(os.environ.get("SK_JOB_TIMEOUT_SECONDS", "3600"))
+# Longest one ffmpeg run (decode, encode or mix) may take before it's killed.
+FFMPEG_TIMEOUT_SECONDS = float(os.environ.get("SK_FFMPEG_TIMEOUT_SECONDS", "600"))
+# A model stuck where it never reaches a chunk (a hung download, a deadlock)
+# can't be interrupted: the janitor marks its job timed out this long after the
+# deadline, so clients stop waiting. The worker stays busy until it returns.
+WATCHDOG_GRACE_SECONDS = 60
+# How often the janitor expires old jobs and checks the running job's deadline.
+JANITOR_INTERVAL_SECONDS = 60
 # Finished splits, kept forever. Set SK_CACHE=0 to turn the cache off.
 CACHE_DIR = Path(os.environ.get("SK_CACHE_DIR", Path.home() / ".cache" / "sightkick-stem-cache"))
 CACHE_ENABLED = os.environ.get("SK_CACHE", "1") != "0"
@@ -147,6 +160,14 @@ class FfmpegFailed(RuntimeError):
     pass
 
 
+class FfmpegTimedOut(FfmpegFailed):
+    pass
+
+
+# Monotonic clock for job deadlines; tests replace it.
+clock = time.monotonic
+
+
 @dataclass
 class Job:
     id: str
@@ -162,6 +183,8 @@ class Job:
     error_code: str | None = None
     stems: dict[str, Path] = field(default_factory=dict)
     cancelled: bool = False
+    # clock() time past which the running job stops; set when it starts.
+    deadline: float = math.inf
     updated: float = field(default_factory=time.time)
     # Cache key of the inputs, quality and mode; None when caching is off.
     cache_key: str | None = None
@@ -210,6 +233,15 @@ model_states = {key: {"status": "not loaded", "error": None} for key in MODELS}
 separators: dict[str, object] = {}
 
 
+def check_job(job: Job) -> None:
+    """Raises if the job should stop: a client cancelled it or it ran out of time.
+    Called between model chunks and between steps."""
+    if job.cancelled:
+        raise Cancelled()
+    if clock() > job.deadline:
+        raise JobFailed("timed_out")
+
+
 def queue_position(job: Job) -> int | None:
     if job.status != "queued":
         return None
@@ -220,7 +252,7 @@ def queue_position(job: Job) -> int | None:
 
 class ProgressIter:
     """Stands in for tqdm in the models' chunk loops: reports progress on the
-    current job and lets a cancel stop the model between chunks."""
+    current job and lets a cancel or the deadline stop the model between chunks."""
 
     def __init__(self, iterable=None, *args, **kwargs):
         self.iterable = iterable if iterable is not None else []
@@ -232,8 +264,8 @@ class ProgressIter:
     def __iter__(self):
         job = current_job
         for index, item in enumerate(self.iterable):
-            if job and job.cancelled:
-                raise Cancelled()
+            if job:
+                check_job(job)
             yield item
             if job and self.total:
                 lo, hi = job.span
@@ -294,7 +326,10 @@ def get_separator(quality: str):
 
 
 def run(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegTimedOut(f"{cmd[0]} ran over {FFMPEG_TIMEOUT_SECONDS:.0f}s") from exc
     if result.returncode != 0:
         raise FfmpegFailed(f"{cmd[0]} failed: {result.stderr.strip()[-500:]}")
 
@@ -318,8 +353,7 @@ def is_silent(wav: Path) -> bool:
 
 def separate(job: Job, key: str, wav: Path, out_dir: Path, span: tuple[float, float]) -> list[Path]:
     """Runs one model pass over `wav`; returns the stem WAVs, named by stem."""
-    if job.cancelled:
-        raise Cancelled()
+    check_job(job)
     if key not in separators:
         job.set(stage=f"loading {key} model", progress=span[0])
     separator = get_separator(key)
@@ -361,8 +395,7 @@ def encode(job: Job, named: list[tuple[str, Path]], span: tuple[float, float]) -
     lo, hi = span
     backing_parts: list[Path] = []
     for index, (name, wav) in enumerate(named):
-        if job.cancelled:
-            raise Cancelled()
+        check_job(job)
         job.set(progress=lo + (hi - lo) * (index + 1) / len(named))
         if name != "drums" and is_silent(wav):
             # e.g. "keys" on a song without piano, or "ride" on a song that
@@ -526,6 +559,8 @@ def process(job: Job) -> None:
     cmd += ["-ar", "44100", "-ac", "2", str(mix)]
     try:
         run(cmd)
+    except FfmpegTimedOut as exc:
+        raise JobFailed("timed_out") from exc
     except FfmpegFailed as exc:
         raise JobFailed("decode_failed") from exc
 
@@ -553,7 +588,6 @@ def process(job: Job) -> None:
     for path in job.inputs:
         path.unlink(missing_ok=True)
     cache_store(job)
-    job.set(status="done", stage="done", progress=100)
 
 
 def worker(stop: threading.Event) -> None:
@@ -579,29 +613,64 @@ def worker(stop: threading.Event) -> None:
             job = jobs.get(job_id)
             if not job or job.cancelled:
                 continue
-            job.set(status="running", stage="preparing", progress=1)
+            job.set(status="running", stage="preparing", progress=1, deadline=clock() + JOB_TIMEOUT_SECONDS)
         started = time.time()
+        error_code = None
         try:
             process(job)
+            outcome = "done"
             log.info("Job %s done in %.0fs: %s", job.id, time.time() - started, sorted(job.stems))
         except Cancelled:
-            job.set(status="cancelled", stage="cancelled")
-            shutil.rmtree(job.dir, ignore_errors=True)
+            outcome = "cancelled"
         except JobFailed as exc:
             log.error("Job %s failed: %s", job.id, exc.code, exc_info=exc.__cause__ or exc)
-            job.set(status="error", stage="error", error=JOB_ERROR_MESSAGES[exc.code], error_code=exc.code)
+            outcome, error_code = "error", exc.code
+        except FfmpegTimedOut:
+            log.exception("Job %s failed: an ffmpeg step timed out", job.id)
+            outcome, error_code = "error", "timed_out"
         except Exception:  # noqa: BLE001 - any other failure is still a finished job
             log.exception("Job %s failed", job.id)
-            job.set(status="error", stage="error", error=JOB_ERROR_MESSAGES["internal"], error_code="internal")
+            outcome, error_code = "error", "internal"
         finally:
             current_job = None
-            with lock:
-                if job.cache_key and inflight.get(job.cache_key) == job.id:
-                    inflight.pop(job.cache_key, None)
+        finish(job, outcome, error_code)
+        if outcome == "cancelled":
+            shutil.rmtree(job.dir, ignore_errors=True)
+
+
+def finish(job: Job, outcome: str, error_code: str | None = None) -> bool:
+    """Moves a running job to its final status ("done", "error" or
+    "cancelled"). Returns False, changing nothing, if the job already left
+    "running": the watchdog may have timed it out while the model was stuck."""
+    with lock:
+        if job.status != "running":
+            return False
+        if outcome == "error":
+            assert error_code is not None
+            job.set(status="error", stage="error", error=JOB_ERROR_MESSAGES[error_code], error_code=error_code)
+        else:
+            job.set(status=outcome, stage=outcome, progress=100 if outcome == "done" else job.progress)
+        if job.cache_key and inflight.get(job.cache_key) == job.id:
+            inflight.pop(job.cache_key, None)
+        return True
+
+
+def expire_overdue_job() -> None:
+    """Times out the running job once it's WATCHDOG_GRACE_SECONDS past its
+    deadline. Normally the job stops itself at the deadline (check_job); this
+    covers a model stuck where no check runs. Python can't kill the thread, so
+    the job is also flagged cancelled in case the model ever returns."""
+    job = current_job
+    if not job or clock() <= job.deadline + WATCHDOG_GRACE_SECONDS:
+        return
+    job.cancelled = True
+    if finish(job, "error", "timed_out"):
+        log.error("Job %s is stuck past its deadline; timed it out. The worker stays busy until the model returns.", job.id)
 
 
 def janitor(stop: threading.Event) -> None:
-    while not stop.wait(60):
+    while not stop.wait(JANITOR_INTERVAL_SECONDS):
+        expire_overdue_job()
         cutoff = time.time() - JOB_TTL_SECONDS
         with lock:
             # Queued jobs are kept however long they wait; only finished,

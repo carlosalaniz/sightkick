@@ -153,6 +153,7 @@ def lib(monkeypatch):
     monkeypatch.setattr(app, "jobs", {})
     monkeypatch.setattr(app, "inflight", {})
     monkeypatch.setattr(app, "pending", queue.Queue())
+    monkeypatch.setattr(app, "THREAD_POLL_SECONDS", 0.02)  # quick shutdown between tests
 
     real_run = app.run
 
@@ -443,3 +444,55 @@ def test_unknown_jobs_and_stems_get_404_with_a_code(client, lib):
 
 def test_health_reports_the_api_version(client, lib):
     assert client.get("/health").json()["apiVersion"] == 1
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_a_job_past_its_deadline_stops_at_the_next_chunk(client, lib, monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(app, "clock", clock)
+    lib.gate = threading.Event()
+    job = post(client, wav_bytes(1800))
+    wait_for(lib.chunks_started.is_set, "the model to start")
+
+    clock.now += app.JOB_TIMEOUT_SECONDS + 1
+    lib.gate.set()
+    done = wait_done(client, job["id"])
+    assert done["status"] == "error"
+    assert done["errorCode"] == "timed_out"
+
+
+def test_the_watchdog_times_out_a_stuck_job_and_the_late_result_is_ignored(client, lib, monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(app, "clock", clock)
+    lib.gate = threading.Event()
+    job = post(client, wav_bytes(1900))
+    wait_for(lib.chunks_started.is_set, "the model to start")
+
+    app.expire_overdue_job()  # within the deadline: nothing happens
+    assert client.get(f"/jobs/{job['id']}").json()["status"] == "running"
+
+    clock.now += app.JOB_TIMEOUT_SECONDS + app.WATCHDOG_GRACE_SECONDS + 1
+    app.expire_overdue_job()
+    stuck = client.get(f"/jobs/{job['id']}").json()
+    assert stuck["status"] == "error" and stuck["errorCode"] == "timed_out"
+
+    # The model finally returns: the job stays timed out and the worker moves on.
+    gate, lib.gate = lib.gate, None
+    gate.set()
+    later = post(client, wav_bytes(1901))
+    assert wait_done(client, later["id"])["status"] == "done"
+    assert client.get(f"/jobs/{job['id']}").json()["errorCode"] == "timed_out"
+
+
+def test_an_ffmpeg_run_over_its_timeout_reports_timed_out(client, lib, monkeypatch):
+    monkeypatch.setattr(app, "FFMPEG_TIMEOUT_SECONDS", 1e-6)
+    job = wait_done(client, post(client, wav_bytes(2000))["id"])
+    assert job["status"] == "error"
+    assert job["errorCode"] == "timed_out"

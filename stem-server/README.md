@@ -71,6 +71,8 @@ Bump `CACHE_VERSION` in `app.py` when a code change alters what a model produces
 | `SK_MAX_UPLOAD_MB` | `200` | Upload size limit |
 | `SK_OGG_QUALITY` | `6` | Vorbis quality (0–10) of the returned stems |
 | `SK_JOB_TTL_SECONDS` | `3600` | How long a finished job stays reachable by id (its stems stay in the cache) |
+| `SK_JOB_TIMEOUT_SECONDS` | `3600` | Longest a split may run, including a first-use model download; then it ends with `timed_out` |
+| `SK_FFMPEG_TIMEOUT_SECONDS` | `600` | Longest one ffmpeg decode, encode or mix may run before it's killed |
 | `SK_CACHE_DIR` | `/cache` in Docker, else `~/.cache/sightkick-stem-cache` | Where finished splits are cached |
 | `SK_CACHE` | `1` | Set to `0` to turn the cache off |
 | `SK_ALLOWED_ORIGINS` | `*` | CORS origins, comma-separated |
@@ -87,7 +89,7 @@ Stem names follow Clone Hero: the model's `piano` becomes `keys` and `other` bec
 | `GET /jobs/{id}/stems/{name}` | the stem as Ogg Vorbis |
 | `DELETE /jobs/{id}` | cancel and delete (cached stems are kept) |
 
-Jobs run one at a time. A `POST /jobs` that hits the cache comes back with `status: "done"` straight away. The port is bound to `127.0.0.1` in `docker-compose.yml`, so other machines on your network can't reach it.
+Jobs run one at a time. A split that runs past its deadline stops at the model's next chunk. A model stuck where it never reaches a chunk (a hung download, say) can't be interrupted inside the process: a minute after the deadline its job is marked `timed_out` so clients stop waiting, but later jobs wait until the model returns or the server restarts. A `POST /jobs` that hits the cache comes back with `status: "done"` straight away. The port is bound to `127.0.0.1` in `docker-compose.yml`, so other machines on your network can't reach it.
 
 ### Errors
 
@@ -100,7 +102,7 @@ A job's `status` is `queued`, `running`, `done`, `error` or `cancelled`. When it
 | `decode_failed` | ffmpeg couldn't decode the uploaded audio |
 | `no_drums` | A `stems+kit` split found no drums to split into a kit |
 | `model_unavailable` | The model for this preset failed to load (or download) |
-| `timed_out` | The split ran past the server's time limit and was stopped |
+| `timed_out` | The split ran past `SK_JOB_TIMEOUT_SECONDS`, or an ffmpeg step past `SK_FFMPEG_TIMEOUT_SECONDS`, and was stopped |
 | `internal` | Anything else; the server log has the details |
 
 `error` is a short message for people, written by the server. It never contains ffmpeg's or the model library's own text, which goes to the server log with the job id. Clients should branch on `errorCode`, not on `error`, and treat a code they don't know as `internal`.
