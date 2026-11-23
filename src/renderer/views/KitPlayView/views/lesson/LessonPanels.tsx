@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { KitPiece, Voice, VOICE_INFO } from '../../../../kit';
 import { CoachTip } from './coach';
 import { MAX_STARS, PassResult, TARGET } from './machine';
+import { OutcomeTone } from './outcomeText';
 import { LessonStep } from './steps';
 import { barRangeLabel, LessonWindow } from './windows';
 
@@ -124,9 +125,12 @@ export function StepBar({
   );
 }
 
+/** The color a pass message is shown in. */
+export const TONE_COLOR: Record<OutcomeTone, string> = { ok: OK, warn: WARN };
+
 export interface ShownResult extends PassResult {
   message: string;
-  ok: boolean;
+  tone: OutcomeTone;
 }
 
 export function ResultPanel({ result }: { result: ShownResult | undefined }) {
@@ -161,7 +165,7 @@ export function ResultPanel({ result }: { result: ShownResult | undefined }) {
           </p>
           <p
             className="font-semibold text-[13px] px-2.5 py-[7px] rounded-lg m-0 bg-surface-sunken"
-            style={{ color: result.ok ? OK : WARN }}
+            style={{ color: TONE_COLOR[result.tone] }}
           >
             {result.message}
           </p>

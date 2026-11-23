@@ -10,11 +10,13 @@ import {
   LessonState,
   nextLesson,
   PassContext,
+  PassOutcome,
   PassNote,
   scorePass,
   startLesson,
   tierOf,
 } from './machine';
+import { describeOutcome } from './outcomeText';
 import { buildSteps } from './steps';
 
 const steps = buildSteps(['hihat', 'snare', 'kick'], {
@@ -22,13 +24,17 @@ const steps = buildSteps(['hihat', 'snare', 'kick'], {
   hasDrumStem: true,
 });
 const idx = (kind: string) => steps.findIndex((s) => s.kind === kind);
+const text = (o: PassOutcome) =>
+  describeOutcome(o, {
+    lessons: ['Intro', 'Verse', 'Chorus'],
+    steps: steps.map((s) => s.name),
+  });
 
 function ctx(over: Partial<PassContext> = {}): PassContext {
   return {
     steps,
     stars: [0, 0, 0],
     seen: [false, false, false],
-    names: ['Intro', 'Verse', 'Chorus'],
     stepsFor: () => steps,
     starAllowed: true,
     ...over,
@@ -147,19 +153,36 @@ describe('endPass', () => {
     const a = endPass(state({ step: idx('listen') }), undefined, ctx());
 
     expect(a.state.step).toBe(idx('count'));
-    expect(a.ok).toBe(true);
+    expect(a.kind).toBe('listened');
 
     const b = endPass(a.state, undefined, ctx());
 
     expect(b.state.step).toBe(2);
-    expect(b.message).toBe('Next: Hi-hat + kick');
+    expect(text(b)).toBe('Next: Hi-hat + kick');
+  });
+
+  it('skips a playing step with nothing in it to play', () => {
+    const r = endPass(state({ step: 2 }), undefined, ctx());
+
+    expect(r).toMatchObject({ kind: 'skipped', nextStep: 3 });
+    expect(text(r)).toBe('Nothing to play here. Next: Hi-hat + snare');
+  });
+
+  it('gives no more stars to a lesson that has them all', () => {
+    const r = endPass(
+      state({ step: idx('mix'), readGuide: 0, speed: 1, baseSpeed: 1 }),
+      clean,
+      ctx({ stars: [3, 3, 3] }),
+    );
+
+    expect(r).toMatchObject({ kind: 'finished', star: 'full', nextLesson: 1 });
   });
 
   it('advances a step on a clean pass, and sets read help when reaching read', () => {
     const r = endPass(state({ step: 2 }), clean, ctx());
 
     expect(r.state.step).toBe(3);
-    expect(r.message).toBe('Clean. Next: Hi-hat + snare.');
+    expect(text(r)).toBe('Clean. Next: Hi-hat + snare.');
 
     const toRead = endPass(
       state({ step: idx('all'), readGuide: 0 }),
@@ -181,7 +204,7 @@ describe('endPass', () => {
     const r = endPass(s, clean, ctx());
 
     expect(r.state.step).toBe(idx('mix'));
-    expect(r.message).toBe('You read it with no help. Now the mix-up.');
+    expect(text(r)).toBe('You read it with no help. Now the mix-up.');
   });
 
   it('finishes the lesson from read when there is no mix-up', () => {
@@ -192,15 +215,15 @@ describe('endPass', () => {
       ctx({ steps: noMix, stepsFor: () => noMix }),
     );
 
-    expect(r.finished).toEqual({ lesson: 0, star: true, withheld: false });
+    expect(r).toMatchObject({ kind: 'finished', lesson: 0, star: 'earned' });
   });
 
   it('earns a star on a clean mix-up at the base speed and moves on', () => {
     const r = endPass(state({ step: idx('mix'), readGuide: 0 }), clean, ctx());
 
-    expect(r.finished).toEqual({ lesson: 0, star: true, withheld: false });
+    expect(r).toMatchObject({ kind: 'finished', lesson: 0, star: 'earned' });
     expect(r.state).toMatchObject({ lesson: 1, step: 0, speed: 0.8 });
-    expect(r.message).toBe('★ Intro read at 80% speed. Next: Verse at 80%.');
+    expect(text(r)).toBe('★ Intro read at 80% speed. Next: Verse at 80%.');
   });
 
   it('gives no star when the lesson had slowed down', () => {
@@ -210,8 +233,8 @@ describe('endPass', () => {
       ctx(),
     );
 
-    expect(r.finished).toEqual({ lesson: 0, star: false, withheld: false });
-    expect(r.message.startsWith('★')).toBe(false);
+    expect(r).toMatchObject({ kind: 'finished', lesson: 0, star: 'tooSlow' });
+    expect(text(r).startsWith('★')).toBe(false);
     // Still the lowest-star lesson, so it comes straight back, now at the read step.
     expect(r.state).toMatchObject({ lesson: 0, step: idx('read'), speed: 0.8 });
   });
@@ -224,13 +247,12 @@ describe('endPass', () => {
       ctx({
         stars: [0, 0],
         seen: [false, false],
-        names: ['Intro', 'Verse'],
         starAllowed: false,
       }),
     );
 
-    expect(r.finished).toEqual({ lesson: 0, star: false, withheld: true });
-    expect(r.message).toBe('Intro read at 80% speed. Next: Intro at 80%.');
+    expect(r).toMatchObject({ kind: 'finished', lesson: 0, star: 'waited' });
+    expect(text(r)).toBe('Intro read at 80% speed. Next: Intro at 80%.');
     expect(r.state).toMatchObject({ lesson: 0, step: idx('read'), speed: 0.8 });
   });
 
@@ -248,18 +270,24 @@ describe('endPass', () => {
     const first = endPass(state({ step: 2 }), rough, ctx());
 
     expect(first.state.rough).toBe(1);
-    expect(first.message).toContain('One more like it');
+    expect(text(first)).toContain('One more like it');
 
     const second = endPass(first.state, rough, ctx());
 
+    expect(second).toMatchObject({
+      kind: 'easedOff',
+      ease: { kind: 'slower', speed: 0.7 },
+    });
     expect(second.state).toMatchObject({ rough: 0, speed: 0.7, step: 2 });
-    expect(second.message).toBe('Slowing down to 70% speed.');
+    expect(text(second)).toBe('Slowing down to 70% speed.');
   });
 
   it('never slows below 60%', () => {
     const r = endPass(state({ step: 2, rough: 1, speed: 0.6 }), rough, ctx());
 
     expect(r.state.speed).toBe(0.6);
+    expect(r).toMatchObject({ ease: { kind: 'slowest', speed: 0.6 } });
+    expect(text(r)).toBe(`Rough pass (${rough.pct}%). Staying at 60%.`);
   });
 
   it('brings help back when reading goes rough', () => {
@@ -274,7 +302,7 @@ describe('endPass', () => {
     const second = endPass(first.state, rough, ctx());
 
     expect(second.state.step).toBe(idx('all'));
-    expect(second.message).toBe('Back to full colors for a pass.');
+    expect(text(second)).toBe('Back to full colors for a pass.');
   });
 
   it('goes back to the lesson bars after two rough mix-ups', () => {
@@ -284,6 +312,7 @@ describe('endPass', () => {
       ctx(),
     );
 
+    expect(r).toMatchObject({ kind: 'easedOff', ease: { kind: 'lessonBars' } });
     expect(r.state).toMatchObject({ step: idx('read'), readGuide: 0.3 });
   });
 
@@ -291,7 +320,7 @@ describe('endPass', () => {
     const r = endPass(state({ step: 2, rough: 1 }), close, ctx());
 
     expect(r.state).toMatchObject({ step: 2, rough: 0 });
-    expect(r.message).toBe(
+    expect(text(r)).toBe(
       `Close: ${close.pct}%, 0 missed. You need 85% with at most 1 missed.`,
     );
   });

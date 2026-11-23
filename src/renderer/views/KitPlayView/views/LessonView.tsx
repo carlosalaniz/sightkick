@@ -24,6 +24,7 @@ import {
   ShownResult,
   OK,
   StepBar,
+  TONE_COLOR,
   WARN,
   WhyPanel,
 } from './lesson/LessonPanels';
@@ -58,6 +59,11 @@ import {
   WAIT_MODE_KEY,
   WaitGraceMs,
 } from './lesson/persisted';
+import {
+  describeOutcome,
+  OutcomeTone,
+  outcomeTone,
+} from './lesson/outcomeText';
 import { layoutStaff } from './lesson/staff';
 import { TempoControl } from './lesson/TempoControl';
 import { TempoBar } from './lesson/TempoBar';
@@ -103,11 +109,10 @@ interface PassTracker {
 interface Toast {
   id: number;
   message: string;
-  ok: boolean;
+  tone: OutcomeTone;
 }
 
 const voicesOf = (notes: TimelineNote[]) => new Set(notes.map((n) => n.voice));
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** How far before the lesson window a run-up may start (into the bar before). */
 const RUN_UP_REACH = 2;
 /** A shorter run-up than this isn't one; the song just carries on. */
@@ -419,45 +424,34 @@ export function LessonView({ session }: { session: PlaySession }) {
       steps,
       stars,
       seen,
-      names: lessons.map((l) => l.name),
       stepsFor: (i) => allSteps[i] ?? [],
       starAllowed: passWaits === 0,
     });
-
-    if (waitMode && passResult) {
-      const waited = passWaits > 0 ? plural(passWaits, 'wait') : 'no waits';
-
-      outcome.message = outcome.finished?.withheld
-        ? `${outcome.message} (${waited}: no star)`
-        : `${outcome.message} · ${waited}`;
-    }
+    const message = describeOutcome(
+      outcome,
+      { lessons: lessons.map((l) => l.name), steps: steps.map((s) => s.name) },
+      waitMode ? passWaits : undefined,
+    );
+    const tone = outcomeTone(outcome);
 
     setState(outcome.state);
-    setToast((t) => ({
-      id: (t?.id ?? 0) + 1,
-      message: outcome.message,
-      ok: outcome.ok,
-    }));
+    setToast((t) => ({ id: (t?.id ?? 0) + 1, message, tone }));
     setToastShown(true);
 
     if (passResult) {
-      setResult({ ...passResult, message: outcome.message, ok: outcome.ok });
+      setResult({ ...passResult, message, tone });
       setTip(coachTip(passResult, tracker.current.history));
     }
 
-    const { finished } = outcome;
-    const nextKey = lessons[outcome.state.lesson]?.key;
-
-    if (finished) {
-      const key = lessons[finished.lesson].key;
+    if (outcome.kind === 'finished') {
+      const key = lessons[outcome.lesson].key;
+      const nextKey = lessons[outcome.nextLesson]?.key;
+      const earned = outcome.star === 'earned' ? 1 : 0;
 
       saveProgress((p) => ({
         stars: {
           ...p.stars,
-          [key]: Math.min(
-            MAX_STARS,
-            (p.stars[key] ?? 0) + (finished.star ? 1 : 0),
-          ),
+          [key]: Math.min(MAX_STARS, (p.stars[key] ?? 0) + earned),
         },
         seen: { ...p.seen, [key]: true },
         lesson: nextKey,
@@ -872,8 +866,8 @@ export function LessonView({ session }: { session: PlaySession }) {
               className="absolute top-3 left-1/2 -translate-x-1/2 bg-surface border rounded-full px-3.5 py-1.5 font-semibold text-[13px] whitespace-nowrap max-w-[92%] overflow-hidden text-ellipsis pointer-events-none transition-opacity duration-300"
               style={{
                 opacity: toast && toastShown ? 1 : 0,
-                borderColor: toast?.ok ? OK : WARN,
-                color: toast?.ok ? OK : WARN,
+                borderColor: toast ? TONE_COLOR[toast.tone] : undefined,
+                color: toast ? TONE_COLOR[toast.tone] : undefined,
               }}
             >
               {toast?.message}
