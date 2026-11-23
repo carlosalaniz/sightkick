@@ -3,6 +3,8 @@ export type SampleBlock = Float32Array<ArrayBuffer>;
 export interface TrackConfig {
   name: string;
   urls: string[];
+  /** Mix the decoded audio down to one channel: half the memory, no panning. */
+  mono?: boolean;
 }
 
 export interface AudioTrackHandle {

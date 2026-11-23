@@ -1,6 +1,6 @@
 import { BaseAudioTrack } from './base-track';
 import { LoopWindow, TrackConfig } from './types';
-import { trimTrailingSilence } from './helpers';
+import { downmixToMono, trimTrailingSilence } from './helpers';
 
 export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   context: AudioContext;
@@ -43,20 +43,21 @@ export abstract class BaseAudioPlayer<TTrack extends BaseAudioTrack> {
   private async createTracks(trackConfigs: TrackConfig[]): Promise<TTrack[]> {
     const tracks: TTrack[] = [];
 
-    for (const { name, urls } of trackConfigs) {
+    for (const { name, urls, mono } of trackConfigs) {
       const audioBuffers: AudioBuffer[] = [];
 
       for (const url of urls) {
         const data = await fetch(url).then((res) => res.arrayBuffer());
         const decoded = await this.context.decodeAudioData(data);
+        const trimmed = trimTrailingSilence(
+          decoded,
+          this.context,
+          undefined,
+          this.getMinDurationSeconds(),
+        );
 
         audioBuffers.push(
-          trimTrailingSilence(
-            decoded,
-            this.context,
-            undefined,
-            this.getMinDurationSeconds(),
-          ),
+          mono ? downmixToMono(trimmed, this.context) : trimmed,
         );
       }
 

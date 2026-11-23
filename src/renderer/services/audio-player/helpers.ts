@@ -69,3 +69,27 @@ export function trimTrailingSilence(
 
   return trimmed;
 }
+
+/** One channel averaging the buffer's channels; the buffer itself if mono. */
+export function downmixToMono(
+  buffer: AudioBuffer,
+  context: BaseAudioContext,
+): AudioBuffer {
+  if (buffer.numberOfChannels <= 1) {
+    return buffer;
+  }
+
+  const mono = context.createBuffer(1, buffer.length, buffer.sampleRate);
+  const out = mono.getChannelData(0);
+  const scale = 1 / buffer.numberOfChannels;
+
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const data = buffer.getChannelData(channel);
+
+    for (let i = 0; i < data.length; i += 1) {
+      out[i] += data[i] * scale;
+    }
+  }
+
+  return mono;
+}

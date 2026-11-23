@@ -27,4 +27,13 @@ describe('withKitStems', () => {
       { name: 'song', urls: ['s'] },
     ]);
   });
+
+  it('asks for the kit pieces in mono when told to, and nothing else', () => {
+    const result = withKitStems(tracks, [{ name: 'kick', src: 'k' }], true);
+
+    expect(result.trackData).toEqual([
+      { name: 'kick', urls: ['k'], mono: true },
+      { name: 'song', urls: ['s'] },
+    ]);
+  });
 });

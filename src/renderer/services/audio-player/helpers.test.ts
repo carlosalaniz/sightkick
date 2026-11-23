@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { trimTrailingSilence } from './helpers';
+import { downmixToMono, trimTrailingSilence } from './helpers';
 import { FakeAudioBuffer, makeBuffer } from './test-support';
 
 const context = {
@@ -86,5 +86,25 @@ describe('trimTrailingSilence', () => {
     );
 
     expect(trimmed).toBe(buffer as unknown as AudioBuffer);
+  });
+});
+
+describe('downmixToMono', () => {
+  it('averages the channels into one', () => {
+    const stereo = makeBuffer([
+      [1, 0.5, -1],
+      [0, 0.5, 1],
+    ]) as unknown as AudioBuffer;
+    const mono = downmixToMono(stereo, context);
+
+    expect(mono.numberOfChannels).toBe(1);
+    expect(mono.sampleRate).toBe(stereo.sampleRate);
+    expect(Array.from(mono.getChannelData(0))).toEqual([0.5, 0.5, 0]);
+  });
+
+  it('returns a mono buffer as it is', () => {
+    const mono = makeBuffer([[1, 2]]) as unknown as AudioBuffer;
+
+    expect(downmixToMono(mono, context)).toBe(mono);
   });
 });

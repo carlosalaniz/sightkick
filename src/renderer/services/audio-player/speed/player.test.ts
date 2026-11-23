@@ -9,7 +9,10 @@ import { TrackConfig } from '../types';
 
 const trimSpy = vi.hoisted(() => vi.fn((buffer: unknown) => buffer));
 
-vi.mock('../helpers', () => ({ trimTrailingSilence: trimSpy }));
+vi.mock('../helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../helpers')>()),
+  trimTrailingSilence: trimSpy,
+}));
 
 interface MockStream {
   channels: Float32Array[];
@@ -79,6 +82,32 @@ afterEach(() => {
 });
 
 describe('SpeedAudioPlayer', () => {
+  it('gives a mono track one voice per file', async () => {
+    const stereo = (data: ArrayBuffer) =>
+      Promise.resolve(
+        context.createBuffer(2, data.byteLength, 1) as unknown as AudioBuffer,
+      );
+
+    context.decodeAudioData = stereo as never;
+
+    const player = new SpeedAudioPlayer(
+      [
+        { name: 'kick', urls: ['k.ogg'], mono: true },
+        { name: 'backing', urls: ['b.ogg'] },
+      ],
+      vi.fn(),
+    );
+
+    await player.ready;
+    await flush();
+
+    expect(streams[0].init.mock.calls[0][0]).toHaveLength(3);
+    expect(streams[0].init.mock.calls[0][2]).toEqual([
+      { start: 0, count: 1, kind: 'transient' },
+      { start: 1, count: 2, kind: 'vocoder' },
+    ]);
+  });
+
   it('stretches drums and kit pieces as drums and everything else smoothly', async () => {
     const player = new SpeedAudioPlayer(
       [

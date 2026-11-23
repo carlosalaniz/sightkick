@@ -11,7 +11,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { useInput } from '../../context/InputContext';
 import { useSongViewSettings } from '../../context/SongViewSettingsContext';
-import { useSongLoader } from '../../hooks/useSongLoader';
+import { isLowMemoryDevice, useSongLoader } from '../../hooks/useSongLoader';
 import { useSheetMusic } from '../../hooks/useSheetMusic';
 import { useEngine } from '../../hooks/useEngine';
 import { usePersisted } from '../../hooks/usePersisted';
@@ -77,7 +77,7 @@ export function KitPlayView() {
   // With a drum-kit split, the kit pieces play instead of the drums stem so
   // views can mute just the pieces the player is playing.
   const { trackData, kitStems } = useMemo(
-    () => withKitStems(songTrackData, songData?.drumKit),
+    () => withKitStems(songTrackData, songData?.drumKit, isLowMemoryDevice()),
     [songTrackData, songData?.drumKit],
   );
   const { chart, parsedMidi } = useSheetMusic({
@@ -421,10 +421,15 @@ export function KitPlayView() {
 
 const EMPTY_RENDER_DATA: never[] = [];
 
-/** Swaps the drums track for the song's kit-piece stems, when it has them. */
+/**
+ * Swaps the drums track for the song's kit-piece stems, when it has them.
+ * With `mono`, the pieces are mixed down to one channel each: half the memory
+ * on small devices, at the cost of the toms' and cymbals' stereo placement.
+ */
 export function withKitStems(
   trackData: TrackConfig[],
   drumKit: AudioData[] | undefined,
+  mono = false,
 ): { trackData: TrackConfig[]; kitStems: DrumKitPiece[] } {
   const pieces = DRUM_KIT_PIECES.filter(
     (p) => drumKit?.some((a) => a.name === p),
@@ -439,6 +444,7 @@ export function withKitStems(
       ...pieces.map((name) => ({
         name,
         urls: drumKit!.filter((a) => a.name === name).map((a) => a.src),
+        ...(mono ? { mono } : {}),
       })),
       ...trackData.filter((t) => t.name !== 'drums'),
     ],
