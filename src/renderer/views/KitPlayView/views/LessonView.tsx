@@ -46,6 +46,18 @@ import {
   startLesson,
   tierOf,
 } from './lesson/machine';
+import {
+  LessonProgress,
+  parseFlag,
+  parseProgress,
+  parseWaitGrace,
+  PROGRESS_KEY,
+  RUN_UP_KEY,
+  SongProgress,
+  WAIT_GRACE_KEY,
+  WAIT_MODE_KEY,
+  WaitGraceMs,
+} from './lesson/persisted';
 import { layoutStaff } from './lesson/staff';
 import { TempoControl } from './lesson/TempoControl';
 import { TempoBar } from './lesson/TempoBar';
@@ -73,15 +85,6 @@ import {
   windowNotes,
   windowSpan,
 } from './lesson/windows';
-
-interface SongProgress {
-  stars: Record<string, number>;
-  seen: Record<string, boolean>;
-  /** Key of the lesson last worked on. */
-  lesson?: string;
-}
-
-type V7Progress = Record<string, SongProgress>;
 
 const EMPTY_PROGRESS: SongProgress = { stars: {}, seen: {} };
 const DEFAULT_CLICK = 0.6;
@@ -119,9 +122,10 @@ export function LessonView({ session }: { session: PlaySession }) {
   const { engine, bars, notes, pieceByVoice, timeStore, setPlaybackSpeed } =
     session;
   const songId = session.song.id;
-  const [allProgress, setAllProgress] = usePersisted<V7Progress>(
-    'settings.v7.progress',
+  const [allProgress, setAllProgress] = usePersisted<LessonProgress>(
+    PROGRESS_KEY,
     {},
+    parseProgress,
   );
   const progress = allProgress[songId] ?? EMPTY_PROGRESS;
   const lessons = useMemo(
@@ -172,12 +176,13 @@ export function LessonView({ session }: { session: PlaySession }) {
     history: new Map(),
   });
   const flashes = useRef<KitFlashes>({ strikes: new Map(), judged: new Map() });
-  const [waitMode, setWaitMode] = usePersisted('settings.v7.waitMode', false);
-  const [waitGraceMs, setWaitGraceMs] = usePersisted<number>(
-    'settings.v7.waitGraceMs',
+  const [waitMode, setWaitMode] = usePersisted(WAIT_MODE_KEY, false, parseFlag);
+  const [waitGraceMs, setWaitGraceMs] = usePersisted<WaitGraceMs>(
+    WAIT_GRACE_KEY,
     WAIT_GRACE_OPTIONS_MS[1],
+    parseWaitGrace,
   );
-  const [runUp, setRunUp] = usePersisted('settings.v7.runUp', true);
+  const [runUp, setRunUp] = usePersisted(RUN_UP_KEY, true, parseFlag);
   /** When the current hold started (performance.now), and on which notes. */
   const hold = useRef<{ since: number; ids: Set<string> } | undefined>(
     undefined,

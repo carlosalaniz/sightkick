@@ -308,6 +308,24 @@ describe('LessonView', () => {
     expect(screen.queryByText('target 85%')).not.toBeInTheDocument();
   });
 
+  it('opens on saved progress that lost its stars instead of crashing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    localStorage.setItem(
+      'settings.v7.progress',
+      JSON.stringify({ 'song-1': { seen: { b0: true }, lesson: 'b4' } }),
+    );
+    localStorage.setItem('settings.v7.waitGraceMs', '45');
+    render(<LessonView session={makeSession().session} />);
+
+    expect(screen.getByText('Verse').closest('button')).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    expect(localStorage.getItem('settings.v7.waitGraceMs')).toBe('60');
+    warn.mockRestore();
+  });
+
   it('remembers the lesson per song', () => {
     const { session } = makeSession();
     const view = render(<LessonView session={session} />);
