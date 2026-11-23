@@ -12,6 +12,7 @@ import {
   VOICE_INFO,
   VOICES,
 } from '../../../../kit';
+import { clamp } from '../shared/stats';
 
 /** A stretch of the song the player can loop. Ends where the next one starts. */
 export interface SongSection {
@@ -357,13 +358,11 @@ export const MISSED_LANE_GEM_OPACITY = 0.3;
 
 /** Opacity of an unhit lane gem at `t` look-aheads before its note (negative after). */
 export function laneGemOpacity(t: number, missed: boolean): number {
-  const fadeIn = clamp01((LANE_GEM_FAR - t) / LANE_GEM_FADE);
-  const fadeOut = t < 0 ? clamp01(1 + t / LANE_GEM_FADE) : 1;
+  const fadeIn = clamp((LANE_GEM_FAR - t) / LANE_GEM_FADE);
+  const fadeOut = t < 0 ? clamp(1 + t / LANE_GEM_FADE) : 1;
 
   return fadeIn * fadeOut * (missed ? MISSED_LANE_GEM_OPACITY : 1);
 }
-
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 /** Deterministic pseudo-random in [0, 1) per integer seed (demo autoplay jitter). */
 export function hash01(seed: number): number {
@@ -451,5 +450,5 @@ export function songProgress(bars: TimelineBar[], time: number): number {
   const a = bars[0].start;
   const b = bars[bars.length - 1].end;
 
-  return b > a ? Math.max(0, Math.min(1, (time - a) / (b - a))) : 0;
+  return b > a ? clamp((time - a) / (b - a)) : 0;
 }

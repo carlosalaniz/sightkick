@@ -79,7 +79,6 @@ import {
   hitPoints,
   LadderState,
   ladderStep,
-  mean,
   MISS_COLOR,
   NoteResult,
   PassMode,
@@ -95,6 +94,7 @@ import {
   TIER_BY_ID,
 } from './sheetLanes/scoring';
 import { StaffStrip } from './sheetLanes/StaffStrip';
+import { mean } from './shared/stats';
 
 /** Mutable per-frame state; never rendered directly. */
 interface Runtime {

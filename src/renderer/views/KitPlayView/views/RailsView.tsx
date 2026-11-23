@@ -30,7 +30,6 @@ import {
 } from './arcade/helpers';
 import {
   ARCADE_RULES,
-  clamp,
   displayMultiplier,
   feverLevel,
   formatPercent,
@@ -41,6 +40,7 @@ import {
   SPIRIT_PASS,
 } from './arcade/scoring';
 import { SheetStrip } from './arcade/SheetStrip';
+import { clamp } from './shared/stats';
 import {
   BIG_STYLE,
   ErrorMeter,

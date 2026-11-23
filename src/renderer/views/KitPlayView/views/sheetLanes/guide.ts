@@ -1,4 +1,5 @@
-import { clamp, mean, TierId } from './scoring';
+import { clamp, mean } from '../shared/stats';
+import { TierId } from './scoring';
 
 /**
  * How much guidance is left per bar, 0 (plain notation) to 1 (wide colored

@@ -14,6 +14,7 @@ import {
   starsFromAccuracy,
 } from '../shared/judging';
 import { multiplierAfterHit, multiplierAfterMiss } from '../shared/multiplier';
+import { clamp, mean, sd } from '../shared/stats';
 
 export type TierId = 'perfect' | 'great' | 'good' | 'ok';
 
@@ -94,19 +95,6 @@ export function tierRange(tier: Tier, windowMs: number): string {
     Number.isFinite(tier.limitMs) ? tier.limitMs : windowMs,
   )}`;
 }
-
-export const mean = (a: number[]): number =>
-  a.reduce((s, x) => s + x, 0) / (a.length || 1);
-
-/** Population standard deviation. */
-export const sd = (a: number[]): number => {
-  const m = mean(a);
-
-  return Math.sqrt(mean(a.map((x) => (x - m) ** 2)));
-};
-
-export const clamp = (x: number, lo = 0, hi = 1): number =>
-  Math.max(lo, Math.min(hi, x));
 
 export interface PassStats {
   total: number;

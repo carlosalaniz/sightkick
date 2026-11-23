@@ -4,6 +4,7 @@ import {
   multiplierAfterMiss,
   MultiplierRule,
 } from '../shared/multiplier';
+import { clamp } from '../shared/stats';
 import { assertNever } from '../../../../../shared/assertNever';
 import { Voice } from '../../../../kit';
 
@@ -121,10 +122,6 @@ export const SPIRIT_PASS = 0.7;
 
 const SPIRIT_MISS = 0.08;
 const METER_MISS = 0.04;
-
-export function clamp(x: number, lo = 0, hi = 1): number {
-  return Math.max(lo, Math.min(hi, x));
-}
 
 /**
  * The tier of a hit `offsetSeconds` from its note. Every rules table ends in

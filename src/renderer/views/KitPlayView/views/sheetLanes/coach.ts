@@ -1,5 +1,5 @@
 import { assertNever } from '../../../../../shared/assertNever';
-import { mean, sd } from './scoring';
+import { mean, sd } from '../shared/stats';
 
 /** A row needs this many hits before the coach says anything about it. */
 export const COACH_MIN_HITS = 8;
