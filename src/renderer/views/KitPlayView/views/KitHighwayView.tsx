@@ -17,12 +17,7 @@ import {
 } from './arcade/ArcadeUi';
 import { floatText, GemPools, setAttr, setText } from './arcade/fx';
 import { forEachBeat, poolSizes } from './arcade/helpers';
-import {
-  formatPercent,
-  hitLabel,
-  MAX_MULTIPLIER,
-  PLAY_RULES,
-} from './arcade/scoring';
+import { formatPercent, hitLabel, PLAY_RULES } from './arcade/scoring';
 import { SheetStrip } from './arcade/SheetStrip';
 import {
   GemPool,
@@ -277,10 +272,7 @@ export function KitHighwayView({ session }: { session: PlaySession }) {
 
     setText(scoreRef.current, s.score.toLocaleString());
     setText(streakRef.current, String(s.streak));
-    setText(
-      multRef.current,
-      `×${Math.min(MAX_MULTIPLIER, 1 + Math.floor(s.streak / 10))}`,
-    );
+    setText(multRef.current, `×${s.mult}`);
     setText(
       accRef.current,
       summary.judged ? formatPercent(summary.accuracy) : '–',

@@ -1,4 +1,9 @@
 import { ARCADE_STAR_ACCURACY, starsFromAccuracy } from '../shared/judging';
+import {
+  multiplierAfterHit,
+  multiplierAfterMiss,
+  MultiplierRule,
+} from '../shared/multiplier';
 import { Voice } from '../../../../kit';
 
 /** One grade of a hit, by how far it landed from the note. */
@@ -23,15 +28,10 @@ export interface Tier {
 
 export interface ScoringRules {
   tiers: Tier[];
-  /**
-   * `steps`: +1 every 10 in a row, halved by a miss (arcade).
-   * `streak`: 1 + streak / 10, back to 1 on a miss (Play).
-   */
-  multiplier: 'steps' | 'streak';
+  /** `steps` in the arcade views, `streak` in Play. */
+  multiplier: MultiplierRule;
   fever: boolean;
 }
-
-export const MAX_MULTIPLIER = 4;
 
 export const MISS_COLOR = '#ff7a66';
 
@@ -195,14 +195,7 @@ export function applyHit(
   const tier = rules.tiers[tierIdx];
   const s = updateFever(state, ctx.time);
   const streak = s.streak + 1;
-  let { mult } = s;
-
-  if (rules.multiplier === 'streak') {
-    mult = Math.min(MAX_MULTIPLIER, 1 + Math.floor(streak / 10));
-  } else if (streak % 10 === 0) {
-    mult = Math.min(MAX_MULTIPLIER, mult + 1);
-  }
-
+  const mult = multiplierAfterHit(rules.multiplier, s.mult, streak);
   const next: ScoreState = {
     ...s,
     streak,
@@ -235,7 +228,7 @@ export function applyMiss(
   return {
     ...s,
     streak: 0,
-    mult: rules.multiplier === 'streak' ? 1 : Math.max(1, s.mult >> 1),
+    mult: multiplierAfterMiss(rules.multiplier, s.mult),
     spirit: Math.max(0, s.spirit - SPIRIT_MISS),
     meter:
       rules.fever && !s.fever ? Math.max(0, s.meter - METER_MISS) : s.meter,

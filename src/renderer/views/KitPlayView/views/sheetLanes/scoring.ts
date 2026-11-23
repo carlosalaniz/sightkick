@@ -12,6 +12,7 @@ import {
   SHEET_LANES_STAR_ACCURACY,
   starsFromAccuracy,
 } from '../shared/judging';
+import { multiplierAfterHit, multiplierAfterMiss } from '../shared/multiplier';
 
 export type TierId = 'perfect' | 'great' | 'good' | 'ok';
 
@@ -247,23 +248,18 @@ export function ladderStep(
 
 export interface StreakState {
   streak: number;
-  /** 1–4; up one every 10 hits in a row, halved by a miss. */
+  /** 1–4, by the `steps` multiplier rule. */
   mult: number;
 }
-
-export const MAX_MULT = 4;
 
 export function streakAfterHit(s: StreakState): StreakState {
   const streak = s.streak + 1;
 
-  return {
-    streak,
-    mult: streak % 10 === 0 ? Math.min(MAX_MULT, s.mult + 1) : s.mult,
-  };
+  return { streak, mult: multiplierAfterHit('steps', s.mult, streak) };
 }
 
 export function streakAfterMiss(s: StreakState): StreakState {
-  return { streak: 0, mult: Math.max(1, Math.floor(s.mult / 2)) };
+  return { streak: 0, mult: multiplierAfterMiss('steps', s.mult) };
 }
 
 /** Points for a hit: tier points × multiplier × reading bonus for that bar. */
