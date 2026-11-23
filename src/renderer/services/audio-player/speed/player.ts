@@ -3,7 +3,7 @@ import { StretchStream } from './stretch-stream';
 import { VoiceGroup } from './build-units';
 import { SYNTHESIS_HOP } from './channel-stretcher';
 import { PcmChannel } from './pcm';
-import { DRUM_KIT_PIECES } from '../../../../songData';
+import { DRUM_KIT_PIECES, DRUM_STEM } from '../../../../songData';
 import { BaseAudioPlayer } from '../base-player';
 import {
   LoopWindow,
@@ -16,7 +16,7 @@ const FRAMES_PER_CHUNK = 64;
 const LOOKAHEAD_SECONDS = 2;
 const SCHEDULER_INTERVAL_MS = 100;
 const START_LEAD_SECONDS = 0.1;
-const DRUM_TRACK_NAMES: readonly string[] = ['drums', ...DRUM_KIT_PIECES];
+const DRUM_TRACK_NAMES: readonly string[] = [DRUM_STEM, ...DRUM_KIT_PIECES];
 /**
  * Drums and the kit pieces split from them are stretched with their hits kept
  * sharp (phase reset at each onset); everything else as a smooth vocoder.

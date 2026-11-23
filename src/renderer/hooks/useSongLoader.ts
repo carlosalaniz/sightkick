@@ -9,7 +9,7 @@ import {
   Song,
 } from '../../types';
 import { TrackConfig } from '../services/audio-player/types';
-import { isCoveredByBacking } from '../../songData';
+import { DRUM_STEM, isCoveredByBacking } from '../../songData';
 
 /**
  * Devices with 4 GB of RAM or less (Chromium's navigator.deviceMemory; other
@@ -41,7 +41,7 @@ export function buildTrackData(
     .map((file: AudioData) => ({ urls: [file.src], name: file.name }));
 
   return [
-    ...(drums.length ? [{ name: 'drums', urls: drums }] : []),
+    ...(drums.length ? [{ name: DRUM_STEM, urls: drums }] : []),
     ...(useBacking && song.backing
       ? [{ name: song.backing.name, urls: [song.backing.src] }]
       : []),

@@ -18,7 +18,7 @@ import { usePersisted } from '../../hooks/usePersisted';
 import { ticksToSeconds } from '../../../chart-parser/timing';
 import { AudioData, ScoreData } from '../../../types';
 import { TrackConfig } from '../../services/audio-player/types';
-import { DRUM_KIT_PIECES, DrumKitPiece } from '../../../songData';
+import { DRUM_KIT_PIECES, DRUM_STEM, DrumKitPiece } from '../../../songData';
 import { CountIn } from '../../components/CountIn';
 import { AudioVolume } from '../../components/AudioVolume';
 import { ClickControls } from '../../components/ClickControls';
@@ -446,7 +446,7 @@ export function withKitStems(
         urls: drumKit!.filter((a) => a.name === name).map((a) => a.src),
         ...(mono ? { mono } : {}),
       })),
-      ...trackData.filter((t) => t.name !== 'drums'),
+      ...trackData.filter((t) => t.name !== DRUM_STEM),
     ],
     kitStems: pieces,
   };

@@ -37,6 +37,9 @@ export type SplitParts = 'stems' | 'kit';
 /** Folder inside a song that holds its drum-kit stems. */
 export const DRUM_KIT_DIR = 'drumkit';
 
+/** The player track holding a song's drum audio, and its mixer stem name. */
+export const DRUM_STEM = 'drums';
+
 /** Kit stems the drum-kit split produces, in mixer order. */
 export const DRUM_KIT_PIECES = [
   'kick',

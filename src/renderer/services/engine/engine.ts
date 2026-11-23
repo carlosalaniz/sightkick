@@ -10,7 +10,8 @@ import { log } from '../../../shared/log';
 import { clampHitTolerance } from './helpers';
 import { Judge } from './judge';
 import { GameRenderer } from './game-renderer';
-import { DRUM_GATE_FADE_SECONDS, DRUM_STEM_NAME } from './constants';
+import { DRUM_GATE_FADE_SECONDS } from './constants';
+import { DRUM_STEM } from '../../../songData';
 import {
   EngineContext,
   EngineOptions,
@@ -236,7 +237,7 @@ export class Engine {
   setStemVolume(name: string, gain: number): void {
     this.stemGains.set(name, gain);
 
-    if (name === DRUM_STEM_NAME) {
+    if (name === DRUM_STEM) {
       this.applyDrumGain();
     } else {
       this.transport.setStemVolume(name, gain);
@@ -261,7 +262,7 @@ export class Engine {
 
   /** False when the song has no separate drum track to silence. */
   get hasDrumStem(): boolean {
-    return this.transport.hasStem(DRUM_STEM_NAME);
+    return this.transport.hasStem(DRUM_STEM);
   }
 
   setMasterVolume(gain: number): void {
@@ -299,14 +300,10 @@ export class Engine {
   }
 
   private applyDrumGain(fadeSeconds = 0): void {
-    const userGain = this.stemGains.get(DRUM_STEM_NAME) ?? 1;
+    const userGain = this.stemGains.get(DRUM_STEM) ?? 1;
     const gated = this.muteDrumsOnMiss && !this.judge.isGateOpen;
 
-    this.transport.setStemVolume(
-      DRUM_STEM_NAME,
-      gated ? 0 : userGain,
-      fadeSeconds,
-    );
+    this.transport.setStemVolume(DRUM_STEM, gated ? 0 : userGain, fadeSeconds);
   }
 
   private handleFrame = (): void => {
