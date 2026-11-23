@@ -7,6 +7,7 @@ import { TimeStore } from '../../../../services/time-store';
 import { PlaySession } from '../../session';
 import { LessonView } from '../LessonView';
 import { makeBars, rockBar, TICKS_PER_BAR } from './fixtures';
+import { LIMB_TRACK_GAIN } from './steps';
 
 const bars = makeBars(12);
 const notes = Array.from({ length: 12 }, (_, i) => rockBar(i)).flat();
@@ -127,7 +128,7 @@ describe('LessonView', () => {
     expect(session.setPlaybackSpeed).toHaveBeenLastCalledWith(1);
   });
 
-  it('mutes only the kit pieces you play when the drums are split', () => {
+  it('turns the kit pieces you play down to a guide when the drums are split', () => {
     const { session } = makeSession({
       kitStems: ['kick', 'snare', 'hihat'],
     });
@@ -139,8 +140,8 @@ describe('LessonView', () => {
     const last = (name: string) =>
       calls.filter(([n]) => n === name).at(-1)?.[1];
 
-    expect(last('kick')).toBe(0);
-    expect(last('hihat')).toBe(0);
+    expect(last('kick')).toBe(LIMB_TRACK_GAIN);
+    expect(last('hihat')).toBe(LIMB_TRACK_GAIN);
     expect(last('snare')).toBe(1);
     expect(calls.some(([n]) => n === 'drums')).toBe(false);
   });

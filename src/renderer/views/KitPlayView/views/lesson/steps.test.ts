@@ -96,7 +96,7 @@ describe('step helpers', () => {
     expect(drumTrackGain('mix')).toBe(0);
   });
 
-  it('mutes only the kit pieces a limb step has you play', () => {
+  it('turns down only the kit pieces a limb step has you play, to a guide', () => {
     const kit = ['kick', 'snare', 'toms', 'hihat', 'ride', 'crash'] as const;
     const limb = {
       kind: 'limb' as const,
@@ -104,16 +104,16 @@ describe('step helpers', () => {
     };
 
     expect(kitStemGains(limb, [...kit])).toEqual({
-      kick: 0,
+      kick: LIMB_TRACK_GAIN,
       snare: 1,
       toms: 1,
-      hihat: 0,
+      hihat: LIMB_TRACK_GAIN,
       ride: 1,
       crash: 1,
     });
     expect(
       kitStemGains({ kind: 'limb', voices: ['tom2'] }, ['toms', 'snare']),
-    ).toEqual({ toms: 0, snare: 1 });
+    ).toEqual({ toms: LIMB_TRACK_GAIN, snare: 1 });
     expect(kitStemGains({ kind: 'listen', voices: [] }, ['kick'])).toEqual({
       kick: 1,
     });

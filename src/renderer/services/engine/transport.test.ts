@@ -299,6 +299,41 @@ describe('Transport', () => {
     expect(engine.isHeld).toBe(false);
   });
 
+  it('keeps song time still through a hold, even as the suspended player drops its latency', async () => {
+    const { engine, player } = await setup();
+    const ctx = MockAudioPlayer.instances[0].context;
+    let resume: () => void = () => {};
+
+    ctx.resume.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resume = done;
+        }),
+    );
+    engine.playFromTick(0);
+    await flush();
+    player.currentTime = 2;
+    flushFrame();
+    expect(engine.timeStore.get()).toBe(2);
+
+    engine.hold();
+    // Suspended, a real player stops subtracting its output latency, so its
+    // time jumps ahead (0.2 s on Bluetooth headphones).
+    player.currentTime = 2.2;
+    flushFrame();
+    expect(engine.timeStore.get()).toBe(2);
+
+    engine.release();
+    flushFrame();
+    expect(engine.timeStore.get()).toBe(2);
+
+    resume();
+    await flush();
+    player.currentTime = 2.01;
+    flushFrame();
+    expect(engine.timeStore.get()).toBe(2.01);
+  });
+
   it('plays a tick immediately when the count-in is disabled', async () => {
     const { engine, player } = await setup();
 

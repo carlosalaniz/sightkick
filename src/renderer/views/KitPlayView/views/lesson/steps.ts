@@ -55,7 +55,7 @@ export function buildSteps(
   const drums = pick(DRUMS);
   const feet = pick(FEET);
   const rest = opts.hasKitStems
-    ? 'The parts you are not playing stay in the drum track at full volume, so you hear the whole groove.'
+    ? 'The parts you are not playing stay in the drum track at full volume, and yours plays quietly as a guide, so you hear the whole groove.'
     : opts.hasDrumStem
     ? 'The rest of the beat stays in the drum track, quietly, so you still hear the whole groove.'
     : 'The song still has its drums in it, so you hear the whole groove.';
@@ -173,9 +173,11 @@ export const KIT_STEM_OF_VOICE: Record<Voice, DrumKitPiece> = {
 };
 
 /**
- * Gains for kit-piece stems: everything while listening; in limb steps only
- * the pieces you play go silent and the rest of the kit plays at full
- * volume; off when it is all you.
+ * Gains for kit-piece stems: everything while listening; in limb steps the
+ * rest of the kit plays at full volume and the pieces you play drop to a quiet
+ * guide (the level a song without a kit split plays its whole drum track at:
+ * the app makes no sound when you hit, so silence would leave a player whose
+ * kit isn't audible with nothing to follow); off when it is all you.
  */
 export function kitStemGains(
   step: Pick<LessonStep, 'kind' | 'voices'>,
@@ -189,7 +191,11 @@ export function kitStemGains(
         return [piece, 1];
       }
 
-      return [piece, step.kind === 'limb' && !mine.has(piece) ? 1 : 0];
+      if (step.kind !== 'limb') {
+        return [piece, 0];
+      }
+
+      return [piece, mine.has(piece) ? LIMB_TRACK_GAIN : 1];
     }),
   );
 }

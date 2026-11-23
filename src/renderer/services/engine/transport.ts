@@ -46,6 +46,14 @@ export class Transport {
   private createdPlayer: AudioPlayer | undefined;
   private audioPlayer: AudioPlayer | undefined;
   private held = false;
+  /**
+   * Song time at the moment of a hold, reported until the context runs again.
+   * A suspended context's player stops subtracting its output latency, so its
+   * own time jumps ahead by it (0.1-0.3 s on Bluetooth output); left alone,
+   * that jump could carry the held note out of wait mode's window and make
+   * the song stutter between hold and release.
+   */
+  private frozenTime: number | undefined;
   private speedPlayer: SpeedControllableAudioPlayer | undefined;
   private state: PlaybackState = 'idle';
   private isStarted = false;
@@ -265,7 +273,7 @@ export class Transport {
     }
 
     // Starting the player resumes its context, which ends any hold.
-    this.held = false;
+    this.clearHold();
 
     this.playGeneration += 1;
 
@@ -366,6 +374,8 @@ export class Transport {
     }
 
     this.held = true;
+    // Still frozen from a release whose resume hasn't finished: keep that.
+    this.frozenTime ??= this.audioPlayer.currentTime;
     void this.audioPlayer.context.suspend().catch(() => {});
   }
 
@@ -376,9 +386,26 @@ export class Transport {
 
     this.held = false;
 
-    if (this.audioPlayer && this.state === 'playing') {
-      void this.audioPlayer.context.resume().catch(() => {});
+    if (!this.audioPlayer || this.state !== 'playing') {
+      this.frozenTime = undefined;
+
+      return;
     }
+
+    void this.audioPlayer.context
+      .resume()
+      .catch(() => {})
+      .then(() => {
+        if (!this.held) {
+          this.frozenTime = undefined;
+        }
+      });
+  }
+
+  /** Ends a hold for a new start, seek or pause, which set their own time. */
+  private clearHold(): void {
+    this.held = false;
+    this.frozenTime = undefined;
   }
 
   get isHeld(): boolean {
@@ -386,13 +413,15 @@ export class Transport {
   }
 
   pause(): void {
-    this.held = false;
+    const frozen = this.frozenTime;
+
+    this.clearHold();
 
     if (!this.audioPlayer || this.state !== 'playing') {
       return;
     }
 
-    this.setPosition(this.audioPlayer.currentTime);
+    this.setPosition(frozen ?? this.audioPlayer.currentTime);
     this.audioPlayer.pause();
     this.clickTrack?.clearPending();
     this.state = 'parked';
@@ -416,7 +445,7 @@ export class Transport {
       return;
     }
 
-    this.held = false;
+    this.clearHold();
 
     this.playGeneration += 1;
 
@@ -580,7 +609,7 @@ export class Transport {
       return;
     }
 
-    const rawTime = this.audioPlayer.currentTime;
+    const rawTime = this.frozenTime ?? this.audioPlayer.currentTime;
 
     if (!this.loopRegion) {
       this.setPosition(rawTime);
