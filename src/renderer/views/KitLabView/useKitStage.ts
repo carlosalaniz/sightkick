@@ -15,13 +15,13 @@ import {
   layoutTidy,
   PiecePositions,
   svgPoint,
+  prefersReducedMotion,
 } from '../../kit';
 import {
   clampToStage,
   LayoutHistory,
   pieceElement,
   positionsOf,
-  prefersReducedMotion,
   pushHistory,
   snapToGrid,
   withPositions,

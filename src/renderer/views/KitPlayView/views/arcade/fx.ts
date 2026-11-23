@@ -1,3 +1,5 @@
+import { prefersReducedMotion } from '../../../../kit';
+
 /**
  * Imperative SVG effects for the play views. Everything here runs from
  * animation frames or input callbacks, never during render, and writes DOM
@@ -5,14 +7,6 @@
  */
 
 const SVGNS = 'http://www.w3.org/2000/svg';
-
-export function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 function canAnimate(el: Element): boolean {
   return typeof (el as HTMLElement).animate === 'function';

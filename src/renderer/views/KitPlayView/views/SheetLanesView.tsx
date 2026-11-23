@@ -9,7 +9,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { assertNever } from '../../../../shared/assertNever';
 import { usePersisted } from '../../../hooks/usePersisted';
-import { TimelineNote, VOICES } from '../../../kit';
+import { prefersReducedMotion, TimelineNote, VOICES } from '../../../kit';
 import {
   useAnimationFrame,
   useMirror,
@@ -132,9 +132,6 @@ const BACKWARD_JUMP_SECONDS = 0.05;
  * counts as starting the pass from the top.
  */
 const WRAP_EDGE_SECONDS = 0.3;
-const prefersReducedMotion = () =>
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Writes a DOM attribute (or `text` / `style.width`) only when it changed. */
 function setAttr(rt: Runtime, el: Element | null, name: string, v: string) {

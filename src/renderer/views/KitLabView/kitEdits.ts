@@ -132,13 +132,6 @@ export function voiceCoverage(kit: Kit) {
   }));
 }
 
-export function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
 /** The `<g data-piece-id>` of a piece inside a kit drawing. */
 export function pieceElement(
   svg: SVGSVGElement | null,

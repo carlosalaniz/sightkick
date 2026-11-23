@@ -31,8 +31,9 @@ import {
   removeControlFromPiece,
   useKit,
   VOICE_INFO,
+  prefersReducedMotion,
 } from '../../kit';
-import { byX, pieceElement, prefersReducedMotion } from './kitEdits';
+import { byX, pieceElement } from './kitEdits';
 import {
   ADVANCE_DELAY_MS,
   controlChipText,
