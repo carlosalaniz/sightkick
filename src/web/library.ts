@@ -298,4 +298,22 @@ export async function getFile(
   return (await dir.getFileHandle(fileName)).getFile();
 }
 
+/**
+ * The name of a thrown DOMException or Error ('NotFoundError',
+ * 'QuotaExceededError', 'TypeError', ...), for logs and for telling expected
+ * file system failures apart. Not every DOMException is an Error instance.
+ */
+export function errorName(error: unknown): string {
+  return typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    typeof error.name === 'string'
+    ? error.name
+    : typeof error;
+}
+
+/** The file or folder isn't there: the one removal failure that's expected. */
+export const isNotFound = (error: unknown) =>
+  errorName(error) === 'NotFoundError';
+
 export const joinPath = (...parts: string[]) => parts.filter(Boolean).join('/');

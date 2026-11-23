@@ -9,7 +9,8 @@ import {
   DRUM_KIT_PIECES,
   toSong,
 } from '../songData';
-import { getFile, joinPath, LibraryRoot } from './library';
+import { log } from '../shared/log';
+import { errorName, getFile, joinPath, LibraryRoot } from './library';
 
 export const SONG_ID_FILE = '.sightkick';
 
@@ -238,12 +239,15 @@ export function clearAssetCache(): void {
   blobUrls.clear();
 }
 
+type AssetUrl = { kind: 'url'; url: string } | { kind: 'missing' };
+
 async function resolveAsset(
   root: LibraryRoot,
-  ref: string | null | undefined,
-): Promise<string | undefined> {
-  if (!ref?.startsWith(ASSET_PREFIX)) {
-    return ref ?? undefined;
+  songId: string,
+  ref: string,
+): Promise<AssetUrl> {
+  if (!ref.startsWith(ASSET_PREFIX)) {
+    return { kind: 'url', url: ref };
   }
 
   const rel = ref.slice(ASSET_PREFIX.length);
@@ -251,7 +255,7 @@ async function resolveAsset(
   const cached = blobUrls.get(key);
 
   if (cached) {
-    return cached;
+    return { kind: 'url', url: cached };
   }
 
   try {
@@ -259,10 +263,37 @@ async function resolveAsset(
 
     blobUrls.set(key, url);
 
-    return url;
-  } catch {
-    return undefined;
+    return { kind: 'url', url };
+  } catch (error) {
+    // Moved or deleted since the last scan, or the folder lost permission.
+    log.warn('library.asset_missing', {
+      songId,
+      rel,
+      error: errorName(error),
+    });
+
+    return { kind: 'missing' };
   }
+}
+
+/**
+ * Turns stored tracks into playable URLs. A file that can't be read is left
+ * out (and logged): an `sk-asset:` ref is no URL the player can load.
+ */
+async function resolveTracks(
+  root: LibraryRoot,
+  songId: string,
+  list: AudioData[],
+): Promise<AudioData[]> {
+  const resolved = await Promise.all(
+    list.map(async (track) => {
+      const asset = await resolveAsset(root, songId, track.src);
+
+      return asset.kind === 'url' ? [{ ...track, src: asset.url }] : [];
+    }),
+  );
+
+  return resolved.flat();
 }
 
 /** Converts stored song data to what the UI expects, with blob URLs. */
@@ -272,27 +303,29 @@ export async function toUiSong(
   { withAudio = false } = {},
 ): Promise<Song> {
   const song = toSong(stored);
-  const albumCover = await resolveAsset(root, stored.albumCover);
-  const resolve = (list: AudioData[]) =>
-    Promise.all(
-      list.map(async (a) => ({
-        ...a,
-        src: (await resolveAsset(root, a.src)) ?? a.src,
-      })),
-    );
-  const audio = withAudio ? await resolve(stored.audio) : song.audio;
-  const drumKit =
-    withAudio && song.drumKit ? await resolve(song.drumKit) : song.drumKit;
-  const backing =
-    withAudio && song.backing
-      ? (await resolve([song.backing]))[0]
-      : song.backing;
+  const cover = stored.albumCover
+    ? await resolveAsset(root, stored.id, stored.albumCover)
+    : undefined;
+  const albumCover = cover?.kind === 'url' ? cover.url : undefined;
+
+  if (!withAudio) {
+    return { ...song, albumCover };
+  }
+
+  const audio = await resolveTracks(root, stored.id, stored.audio);
+  const drumKit = song.drumKit
+    ? await resolveTracks(root, stored.id, song.drumKit)
+    : undefined;
+  const [backing] = song.backing
+    ? await resolveTracks(root, stored.id, [song.backing])
+    : [];
+  const { drumKit: _storedKit, backing: _storedBacking, ...rest } = song;
 
   return {
-    ...song,
+    ...rest,
     albumCover,
     audio,
-    ...(drumKit ? { drumKit } : {}),
+    ...(drumKit?.length ? { drumKit } : {}),
     ...(backing ? { backing } : {}),
   };
 }
