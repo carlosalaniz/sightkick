@@ -14,7 +14,7 @@ vi.mock('./stem-server', () => ({
   cancelSplit: vi.fn(),
 }));
 
-const { webHandler } = await import('./bridge');
+const { webHandler, parseRescanMode } = await import('./bridge');
 const stemServer = await import('./stem-server');
 const handlers = await import('./handlers');
 const ipc = webHandler.ipcRenderer;
@@ -60,20 +60,19 @@ describe('web bridge', () => {
     off();
   });
 
-  it('passes the rescan mode through, defaulting to picking a folder', () => {
+  it('turns the rescan arguments into a named mode', () => {
     ipc.sendMessage('rescan-songs');
+    ipc.sendMessage('rescan-songs', false);
     ipc.sendMessage('rescan-songs', 'browser');
 
-    expect(handlers.rescanSongs).toHaveBeenNthCalledWith(
-      1,
-      expect.any(Function),
-      undefined,
+    expect(vi.mocked(handlers.rescanSongs).mock.calls.map((c) => c[1])).toEqual(
+      ['pick', 'current', 'browser'],
     );
-    expect(handlers.rescanSongs).toHaveBeenNthCalledWith(
-      2,
-      expect.any(Function),
-      'browser',
-    );
+  });
+
+  it('rescans the current library for a rescan argument it does not know', () => {
+    expect(parseRescanMode(true)).toBe('pick');
+    expect(parseRescanMode({ mode: 'x' })).toBe('current');
   });
 
   it('reports stem tools as ready when the stem server answers', async () => {

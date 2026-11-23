@@ -230,6 +230,15 @@ export interface IpcLoadSongListResponse {
   downloadedEncoreMd5s: string[];
 }
 
+/**
+ * What a library rescan does: 'pick' asks for a new folder (or rescans
+ * browser storage where folders can't be picked), 'current' rescans the
+ * library in use, 'browser' switches the browser build back to browser
+ * storage. On the wire the renderer still sends the older arguments (none or
+ * true, false, 'browser'); the web bridge parses them into this.
+ */
+export type RescanMode = 'pick' | 'current' | 'browser';
+
 export interface IpcScanProgressResponse {
   current: number;
   total: number;

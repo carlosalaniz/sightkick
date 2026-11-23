@@ -8,6 +8,8 @@ import {
   splitSong,
 } from './stem-server';
 import { assertNever } from '../shared/assertNever';
+import { log } from '../shared/log';
+import { RescanMode } from '../types';
 
 // Browser stand-in for the Electron preload bridge: the renderer keeps calling
 // window.electron.ipcRenderer, and messages are handled in-page instead of by
@@ -39,6 +41,31 @@ function subscribe(channel: string, listener: Listener) {
   return () => {
     set.delete(listener);
   };
+}
+
+/**
+ * The renderer sends 'rescan-songs' with no argument or true (pick a folder),
+ * false (rescan the current one) or 'browser' (back to browser storage), as
+ * the desktop app's handler expects. Anything else is a bug in a sender:
+ * rescanning the current library is the one mode that neither opens a
+ * picker nor switches libraries.
+ */
+export function parseRescanMode(arg: unknown): RescanMode {
+  if (arg === undefined || arg === true) {
+    return 'pick';
+  }
+
+  if (arg === false) {
+    return 'current';
+  }
+
+  if (arg === 'browser') {
+    return 'browser';
+  }
+
+  log.warn('bridge.rescan_mode_unknown', { arg: String(arg) });
+
+  return 'current';
 }
 
 const run = (task: Promise<unknown> | void) => {
@@ -84,9 +111,7 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'rescan-songs':
-      run(
-        handlers.rescanSongs(reply, args[0] as boolean | 'browser' | undefined),
-      );
+      run(handlers.rescanSongs(reply, parseRescanMode(args[0])));
 
       break;
 

@@ -1,5 +1,11 @@
 import { SngStream } from '@eliwhite/parse-sng';
-import { IpcUpdateSongPayload, SongData, StorageSchema } from '../types';
+import {
+  IpcUpdateSongPayload,
+  RescanMode,
+  SongData,
+  StorageSchema,
+} from '../types';
+import { assertNever } from '../shared/assertNever';
 import {
   canPickFolder,
   getRoot,
@@ -87,21 +93,19 @@ export async function loadSongList(reply: Reply) {
   }
 }
 
-/**
- * `mode`: true (default, the folder button) picks a new folder, or rescans
- * browser storage where folders can't be picked; false rescans the current
- * root; 'browser' switches back to browser storage.
- */
-export async function rescanSongs(
-  reply: Reply,
-  mode: boolean | 'browser' = true,
-) {
-  try {
-    let root: LibraryRoot;
+type RescanTarget = { kind: 'root'; root: LibraryRoot } | { kind: 'cancelled' };
 
-    if (mode === 'browser') {
-      root = await selectBrowserRoot();
-    } else if (mode === true && canPickFolder()) {
+async function rootForRescan(mode: RescanMode): Promise<RescanTarget> {
+  switch (mode) {
+    case 'browser':
+      return { kind: 'root', root: await selectBrowserRoot() };
+
+    case 'pick': {
+      if (!canPickFolder()) {
+        // Browser storage is the only library here: rescan it.
+        return { kind: 'root', root: await getRoot(true) };
+      }
+
       // Must be the first await so the click's user activation is still valid.
       let handle: FileSystemDirectoryHandle;
 
@@ -111,13 +115,29 @@ export async function rescanSongs(
           mode: 'readwrite',
         });
       } catch {
-        return; // cancelled
+        return { kind: 'cancelled' }; // the user closed the picker
       }
 
-      root = await selectFolderRoot(handle);
-    } else {
-      root = await getRoot(true);
+      return { kind: 'root', root: await selectFolderRoot(handle) };
     }
+
+    case 'current':
+      return { kind: 'root', root: await getRoot(true) };
+
+    default:
+      return assertNever(mode, 'rescan mode');
+  }
+}
+
+export async function rescanSongs(reply: Reply, mode: RescanMode) {
+  try {
+    const target = await rootForRescan(mode);
+
+    if (target.kind === 'cancelled') {
+      return;
+    }
+
+    const { root } = target;
 
     clearAssetCache();
 
