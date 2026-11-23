@@ -9,7 +9,7 @@ import {
 } from './stem-server';
 import { assertNever } from '../shared/assertNever';
 import { log } from '../shared/log';
-import { RescanMode } from '../types';
+import { IpcCheckStemToolsResponse, RescanMode } from '../types';
 
 // Browser stand-in for the Electron preload bridge: the renderer keeps calling
 // window.electron.ipcRenderer, and messages are handled in-page instead of by
@@ -179,8 +179,11 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       // Splitting needs the optional stem server (stem-server/); without it
       // the split option stays hidden.
       run(
-        checkStemServer().then((ok) =>
-          reply(channel, { status: ok ? 'ready' : 'unsupported' }),
+        checkStemServer().then((stemServer) =>
+          reply(channel, {
+            status: stemServer === 'ready' ? 'ready' : 'unsupported',
+            stemServer,
+          } satisfies IpcCheckStemToolsResponse),
         ),
       );
 

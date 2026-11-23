@@ -299,6 +299,61 @@ export async function getFile(
 }
 
 /**
+ * Writes a file. createWritable() writes to a temporary copy that replaces
+ * the file only on close(), so a failed write is aborted to throw that copy
+ * away and leave any existing file as it was.
+ */
+export async function writeFile(
+  dir: FileSystemDirectoryHandle,
+  name: string,
+  data: Blob | string,
+): Promise<void> {
+  const writable = await (
+    await dir.getFileHandle(name, { create: true })
+  ).createWritable();
+
+  try {
+    await writable.write(data);
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch((abortError: unknown) => {
+      log.warn('library.write_abort_failed', {
+        name,
+        error: errorName(abortError),
+      });
+    });
+
+    throw error;
+  }
+}
+
+/**
+ * Removes a file or folder that may already be gone. Only "not found" is
+ * expected; any other failure is logged with `fields` (the song ID) and
+ * reported as 'failed', so the caller decides whether it matters.
+ */
+export async function removeIfPresent(
+  dir: FileSystemDirectoryHandle,
+  name: string,
+  fields: Record<string, unknown>,
+  options?: FileSystemRemoveOptions,
+): Promise<'removed' | 'absent' | 'failed'> {
+  try {
+    await dir.removeEntry(name, options);
+
+    return 'removed';
+  } catch (error) {
+    if (isNotFound(error)) {
+      return 'absent';
+    }
+
+    log.error('library.remove_failed', { ...fields, name }, error);
+
+    return 'failed';
+  }
+}
+
+/**
  * The name of a thrown DOMException or Error ('NotFoundError',
  * 'QuotaExceededError', 'TypeError', ...), for logs and for telling expected
  * file system failures apart. Not every DOMException is an Error instance.

@@ -19,6 +19,7 @@ import {
   selectFolderRoot,
   updateSongs,
   updateStoredSong,
+  writeFile,
 } from './library';
 import {
   buildSong,
@@ -30,6 +31,7 @@ import {
   toUiSong,
 } from './songs';
 import { listenMidi, listMidiDevices, stopListenMidi } from './midi';
+import { resumeSplits } from './stem-server';
 
 export type Reply = (channel: string, payload: unknown) => void;
 
@@ -55,6 +57,8 @@ function regainPermissionOnNextClick(reply: Reply) {
         songs: await uiSongList(root, await loadSongs(root.kind)),
         lastOpenedPath: root.name,
       });
+      // Splits that finished while access was missing were kept to save now.
+      await resumeSplits(reply);
     } catch {
       // Still denied; the folder button lets the user pick again.
     }
@@ -294,19 +298,6 @@ async function unpackSng(data: Uint8Array) {
   });
 
   return files;
-}
-
-async function writeFile(
-  dir: FileSystemDirectoryHandle,
-  name: string,
-  data: Blob | string,
-) {
-  const writable = await (
-    await dir.getFileHandle(name, { create: true })
-  ).createWritable();
-
-  await writable.write(data);
-  await writable.close();
 }
 
 const isSafeFileName = (name: string) =>

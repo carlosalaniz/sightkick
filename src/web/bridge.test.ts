@@ -9,7 +9,7 @@ vi.mock('./handlers', () => ({
 }));
 
 vi.mock('./stem-server', () => ({
-  checkStemServer: vi.fn(async () => false),
+  checkStemServer: vi.fn(async () => 'unreachable'),
   splitSong: vi.fn(async () => undefined),
   cancelSplit: vi.fn(),
 }));
@@ -55,7 +55,10 @@ describe('web bridge', () => {
     ipc.sendMessage('check-stem-tools');
 
     await vi.waitFor(() =>
-      expect(listener).toHaveBeenCalledWith({ status: 'unsupported' }),
+      expect(listener).toHaveBeenCalledWith({
+        status: 'unsupported',
+        stemServer: 'unreachable',
+      }),
     );
     off();
   });
@@ -76,7 +79,7 @@ describe('web bridge', () => {
   });
 
   it('reports stem tools as ready when the stem server answers', async () => {
-    vi.mocked(stemServer.checkStemServer).mockResolvedValueOnce(true);
+    vi.mocked(stemServer.checkStemServer).mockResolvedValueOnce('ready');
 
     const listener = vi.fn();
     const off = ipc.on('check-stem-tools', listener);
@@ -84,7 +87,10 @@ describe('web bridge', () => {
     ipc.sendMessage('check-stem-tools');
 
     await vi.waitFor(() =>
-      expect(listener).toHaveBeenCalledWith({ status: 'ready' }),
+      expect(listener).toHaveBeenCalledWith({
+        status: 'ready',
+        stemServer: 'ready',
+      }),
     );
     off();
   });

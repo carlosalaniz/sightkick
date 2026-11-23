@@ -109,9 +109,18 @@ export interface StemToolsManifest {
   uncompressedSize: number;
 }
 
+/**
+ * The browser build's stem server: answering and able to split, not
+ * answering at all, or answering but unable to split (a model failed to
+ * load, or the address points at something else).
+ */
+export type StemServerHealth = 'ready' | 'unreachable' | 'unhealthy';
+
 export interface IpcCheckStemToolsResponse {
   status: StemToolsStatus;
   installedVersion?: string;
+  /** Browser build only: why the stem server is or isn't usable. */
+  stemServer?: StemServerHealth;
 }
 
 export interface IpcStemToolsRemoteResponse {
