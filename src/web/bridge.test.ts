@@ -5,6 +5,9 @@ vi.mock('./handlers', () => ({
     reply('load-song-list', { songs: [], lastOpenedPath: 'Browser storage' }),
   ),
   rescanSongs: vi.fn(async () => undefined),
+  likeSong: vi.fn(async () => {
+    throw new Error('escaped');
+  }),
   stopListenMidi: vi.fn(),
 }));
 
@@ -105,6 +108,23 @@ describe('web bridge', () => {
       'kit',
     );
     expect(stemServer.cancelSplit).toHaveBeenCalledWith('song-1');
+  });
+
+  it('logs a handler failure that escapes, with its channel', async () => {
+    const error = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    ipc.sendMessage('like-song', 'song-1', true);
+
+    await vi.waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        'ipc.handler_threw',
+        { channel: 'like-song' },
+        expect.any(Error),
+      ),
+    );
+    error.mockRestore();
   });
 
   it('ignores desktop-only channels', () => {

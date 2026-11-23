@@ -68,8 +68,14 @@ export function parseRescanMode(arg: unknown): RescanMode {
   return 'current';
 }
 
-const run = (task: Promise<unknown> | void) => {
-  task?.catch((error: unknown) => console.error(error));
+/**
+ * Runs a handler without waiting for it. Handlers reply with their own
+ * failures; anything that still escapes is a bug, logged with its channel.
+ */
+const run = (channel: Channels, task: Promise<unknown>) => {
+  task.catch((error: unknown) => {
+    log.error('ipc.handler_threw', { channel }, error);
+  });
 };
 /**
  * Channels only the desktop app handles: app updates, stem tool downloads and
@@ -106,22 +112,23 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'load-song-list':
-      run(handlers.loadSongList(reply));
+      run(channel, handlers.loadSongList(reply));
 
       break;
 
     case 'rescan-songs':
-      run(handlers.rescanSongs(reply, parseRescanMode(args[0])));
+      run(channel, handlers.rescanSongs(reply, parseRescanMode(args[0])));
 
       break;
 
     case 'load-song':
-      run(handlers.loadSong(reply, args[0] as string));
+      run(channel, handlers.loadSong(reply, args[0] as string));
 
       break;
 
     case 'update-song':
       run(
+        channel,
         handlers.updateSong(
           reply,
           args[0] as Parameters<typeof handlers.updateSong>[1],
@@ -131,12 +138,13 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'like-song':
-      run(handlers.likeSong(args[0] as string, args[1] as boolean));
+      run(channel, handlers.likeSong(args[0] as string, args[1] as boolean));
 
       break;
 
     case 'download-song':
       run(
+        channel,
         handlers.downloadSong(
           reply,
           args[0] as Parameters<typeof handlers.downloadSong>[1],
@@ -146,12 +154,12 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'midi-device-list':
-      run(handlers.midiDeviceList(reply));
+      run(channel, handlers.midiDeviceList(reply));
 
       break;
 
     case 'listen-midi':
-      run(handlers.startMidi(reply, args[0] as number));
+      run(channel, handlers.startMidi(reply, args[0] as number));
 
       break;
 
@@ -179,6 +187,7 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       // Splitting needs the optional stem server (stem-server/); without it
       // the split option stays hidden.
       run(
+        channel,
         checkStemServer().then((stemServer) =>
           reply(channel, {
             status: stemServer === 'ready' ? 'ready' : 'unsupported',
@@ -190,12 +199,12 @@ function sendMessage(channel: Channels, ...args: unknown[]) {
       break;
 
     case 'split-song':
-      run(splitSong(reply, args[0] as string, args[1] as SplitParts));
+      run(channel, splitSong(reply, args[0] as string, args[1] as SplitParts));
 
       break;
 
     case 'resume-splits':
-      run(resumeSplits(reply));
+      run(channel, resumeSplits(reply));
 
       break;
 

@@ -40,7 +40,9 @@ async function browserRoot(): Promise<LibraryRoot> {
   const handle = await opfs.getDirectoryHandle('songs', { create: true });
 
   // Ask the browser not to evict downloaded songs under storage pressure.
-  navigator.storage.persist?.().catch(() => undefined);
+  navigator.storage.persist?.().catch((error: unknown) => {
+    log.warn('library.persist_request_failed', { error: errorName(error) });
+  });
 
   return { kind: 'browser', handle, name: BROWSER_ROOT_NAME };
 }

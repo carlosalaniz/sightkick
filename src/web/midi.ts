@@ -1,4 +1,5 @@
 import { MidiDevice, MidiMessage } from '../types';
+import { log } from '../shared/log';
 
 // Web MIDI replacement for main/ipc/midi.ts. Device "ports" are indexes into
 // the input list, matching what the renderer already stores.
@@ -55,7 +56,7 @@ export async function listMidiDevices(): Promise<MidiDevice[]> {
       name: input.name ?? `MIDI input ${port + 1}`,
     }));
   } catch (error) {
-    console.error('Failed to enumerate MIDI devices:', error);
+    log.error('midi.list_failed', {}, error);
 
     return [];
   }
@@ -64,7 +65,12 @@ export async function listMidiDevices(): Promise<MidiDevice[]> {
 export function stopListenMidi(): void {
   if (activeInput) {
     activeInput.onmidimessage = null;
-    activeInput.close().catch(() => undefined);
+
+    const { id } = activeInput;
+
+    activeInput.close().catch((error: unknown) => {
+      log.warn('midi.close_failed', { inputId: id, error: String(error) });
+    });
     activeInput = null;
   }
 }

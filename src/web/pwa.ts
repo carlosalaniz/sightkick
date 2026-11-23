@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import { log } from '../shared/log';
 
 /**
  * Registers the service worker (sw.js, built from service-worker.js) that
@@ -15,7 +16,9 @@ export function registerServiceWorker(
 
   const register = () => {
     nav.serviceWorker.register('./sw.js').catch((error: unknown) => {
-      console.warn('SightKick: service worker registration failed', error);
+      log.warn('pwa.service_worker_registration_failed', {
+        error: String(error),
+      });
     });
   };
 
