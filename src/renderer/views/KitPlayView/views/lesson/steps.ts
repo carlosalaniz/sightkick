@@ -1,3 +1,4 @@
+import { assertNever } from '../../../../../shared/assertNever';
 import { Voice, VOICE_INFO, VOICES } from '../../../../kit';
 import { DrumKitPiece } from '../../../../../songData';
 
@@ -148,16 +149,54 @@ export function buildSteps(
 
 /** Steps where you only listen: nothing is scored. */
 export function isListening(kind: StepKind): boolean {
-  return kind === 'listen' || kind === 'count';
+  switch (kind) {
+    case 'listen':
+      return true;
+
+    case 'count':
+      return true;
+
+    case 'limb':
+      return false;
+
+    case 'all':
+      return false;
+
+    case 'read':
+      return false;
+
+    case 'mix':
+      return false;
+
+    default:
+      return assertNever(kind, 'lesson step kind');
+  }
 }
 
 /** Drum-stem gain for a step: full while listening, quiet for limbs, off when it is all you. */
 export function drumTrackGain(kind: StepKind): number {
-  if (isListening(kind)) {
-    return 1;
-  }
+  switch (kind) {
+    case 'listen':
+      return 1;
 
-  return kind === 'limb' ? LIMB_TRACK_GAIN : 0;
+    case 'count':
+      return 1;
+
+    case 'limb':
+      return LIMB_TRACK_GAIN;
+
+    case 'all':
+      return 0;
+
+    case 'read':
+      return 0;
+
+    case 'mix':
+      return 0;
+
+    default:
+      return assertNever(kind, 'lesson step kind');
+  }
 }
 
 /** The kit stem that carries a chart voice. */
@@ -186,16 +225,32 @@ export function kitStemGains(
   const mine = new Set(step.voices.map((v) => KIT_STEM_OF_VOICE[v]));
 
   return Object.fromEntries(
-    kitStems.map((piece) => {
-      if (isListening(step.kind)) {
-        return [piece, 1];
-      }
-
-      if (step.kind !== 'limb') {
-        return [piece, 0];
-      }
-
-      return [piece, mine.has(piece) ? LIMB_TRACK_GAIN : 1];
-    }),
+    kitStems.map((piece) => [piece, kitStemGain(step.kind, mine.has(piece))]),
   );
+}
+
+/** One kit stem's gain in a step; `mine` if you play that piece in it. */
+function kitStemGain(kind: StepKind, mine: boolean): number {
+  switch (kind) {
+    case 'listen':
+      return 1;
+
+    case 'count':
+      return 1;
+
+    case 'limb':
+      return mine ? LIMB_TRACK_GAIN : 1;
+
+    case 'all':
+      return 0;
+
+    case 'read':
+      return 0;
+
+    case 'mix':
+      return 0;
+
+    default:
+      return assertNever(kind, 'lesson step kind');
+  }
 }

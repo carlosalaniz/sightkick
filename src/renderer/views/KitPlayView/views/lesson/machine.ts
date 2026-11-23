@@ -157,11 +157,28 @@ export function guideLevel(
   step: Pick<LessonStep, 'kind'>,
   readGuide: number,
 ): number {
-  if (step.kind === 'read') {
-    return readGuide;
-  }
+  switch (step.kind) {
+    case 'listen':
+      return 1;
 
-  return step.kind === 'mix' ? 0 : 1;
+    case 'count':
+      return 1;
+
+    case 'limb':
+      return 1;
+
+    case 'all':
+      return 1;
+
+    case 'read':
+      return readGuide;
+
+    case 'mix':
+      return 0;
+
+    default:
+      return assertNever(step.kind, 'lesson step kind');
+  }
 }
 
 /** Which lesson to go to after one is read: the first with the fewest stars. */
