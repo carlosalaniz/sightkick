@@ -18,26 +18,51 @@ function fakeDb(data: Map<string, unknown>) {
     close: vi.fn(),
     createObjectStore: vi.fn(),
     transaction: () => {
+      // Completes once every request made on it has succeeded, like the real
+      // one, so a request made from an onsuccess handler keeps it open.
+      let pending = 0;
       const tx = {
         oncomplete: undefined as undefined | (() => void),
         onerror: undefined as undefined | (() => void),
         onabort: undefined as undefined | (() => void),
         error: null,
+        aborted: false,
+        abort: () => {
+          tx.aborted = true;
+          setTimeout(() => tx.onabort?.(), 0);
+        },
         objectStore: () => ({
-          get: (key: string) => {
-            const req = { result: data.get(key) };
+          get: (key: string) => request(() => data.get(key)),
+          put: (value: unknown, key: string) =>
+            request(() => {
+              data.set(key, value);
 
-            setTimeout(() => tx.oncomplete?.(), 0);
-
-            return req;
-          },
-          put: (value: unknown, key: string) => {
-            data.set(key, value);
-            setTimeout(() => tx.oncomplete?.(), 0);
-
-            return { result: key };
-          },
+              return key;
+            }),
         }),
+      };
+      const request = (perform: () => unknown) => {
+        const req = {
+          result: undefined as unknown,
+          onsuccess: undefined as undefined | (() => void),
+        };
+
+        pending += 1;
+        setTimeout(() => {
+          if (tx.aborted) {
+            return;
+          }
+
+          req.result = perform();
+          req.onsuccess?.();
+          pending -= 1;
+
+          if (pending === 0 && !tx.aborted) {
+            tx.oncomplete?.();
+          }
+        }, 0);
+
+        return req;
       };
 
       return tx;
@@ -134,5 +159,31 @@ describe('idb connection', () => {
 
     expect(db.close).toHaveBeenCalled();
     expect(opens).toBe(2);
+  });
+});
+
+describe('idbUpdate', () => {
+  it('reads and writes in one transaction and returns the new value', async () => {
+    outcomes = ['ok'];
+
+    const { idbGet, idbUpdate } = await import('./idb');
+
+    await expect(idbUpdate('k', (current) => `${current}+`)).resolves.toBe(
+      'v+',
+    );
+    await expect(idbGet('k')).resolves.toBe('v+');
+  });
+
+  it('aborts and rejects with the error the update threw', async () => {
+    outcomes = ['ok'];
+
+    const { idbGet, idbUpdate } = await import('./idb');
+
+    await expect(
+      idbUpdate('k', () => {
+        throw new Error('not found');
+      }),
+    ).rejects.toThrow('not found');
+    await expect(idbGet('k')).resolves.toBe('v');
   });
 });

@@ -13,10 +13,11 @@ import {
   getRootName,
   LibraryRoot,
   loadSongs,
+  mergeRescan,
   PermissionNeededError,
-  saveSongs,
   selectBrowserRoot,
   selectFolderRoot,
+  updateSongs,
   updateStoredSong,
 } from './library';
 import {
@@ -172,15 +173,18 @@ export async function rescanSongs(reply: Reply, mode: RescanMode) {
 
       return song;
     });
-    const songs: StorageSchema['songs'] = {};
+    const scanned: StorageSchema['songs'] = {};
 
     for (const song of built) {
       if (song) {
-        songs[song.id] = song;
+        scanned[song.id] = song;
       }
     }
 
-    await saveSongs(root.kind, songs);
+    const songs = await updateSongs(root.kind, (current) =>
+      mergeRescan(scanned, existing, current),
+    );
+
     reply('rescan-songs', {
       songs: await uiSongList(root, songs),
       lastOpenedPath: root.name,
@@ -384,10 +388,7 @@ export async function downloadSong(
 }
 
 async function updateStoredSongs(root: LibraryRoot, song: SongData) {
-  const songs = await loadSongs(root.kind);
-
-  songs[song.id] = song;
-  await saveSongs(root.kind, songs);
+  await updateSongs(root.kind, (songs) => ({ ...songs, [song.id]: song }));
 }
 
 export async function midiDeviceList(reply: Reply) {

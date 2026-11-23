@@ -13,7 +13,14 @@ import {
   STEM_SERVER_URL_KEY,
   StemQuality,
 } from '../stemServerUrl';
-import { getFile, getRoot, joinPath, loadSongs, saveSongs } from './library';
+import {
+  getFile,
+  getRoot,
+  joinPath,
+  loadSongs,
+  updateSongs,
+  withStoredUserData,
+} from './library';
 import { buildSong, clearAssetCache, listSongDir, toUiSong } from './songs';
 
 // Client for the optional stem server (stem-server/ in this repo), which splits
@@ -459,10 +466,11 @@ async function followSplit(
     throw new Error('Failed to rebuild the song after splitting');
   }
 
-  const songs = await loadSongs(root.kind);
-
-  songs[id] = updated;
-  await saveSongs(root.kind, songs);
+  // Likes and scores may have changed while the server worked.
+  await updateSongs(root.kind, (songs) => ({
+    ...songs,
+    [id]: withStoredUserData(updated, songs[id]),
+  }));
   clearAssetCache();
   reply('split-song', {
     id,

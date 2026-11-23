@@ -27,7 +27,8 @@ const SONG = {
 vi.mock('./library', () => ({
   getRoot: vi.fn(async () => ({ kind: 'browser', handle: songDir })),
   loadSongs: vi.fn(async () => ({ 'song-1': SONG })),
-  saveSongs: vi.fn(async () => undefined),
+  updateSongs: vi.fn(async () => ({})),
+  withStoredUserData: (fresh: unknown) => fresh,
   getFile: vi.fn(async () => new Blob(['audio'])),
   joinPath: (p: string) => p,
 }));

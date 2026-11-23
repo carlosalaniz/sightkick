@@ -59,7 +59,8 @@ const state = vi.hoisted(() => ({
 vi.mock('./library', () => ({
   getRoot: vi.fn(async () => ({ kind: 'browser', handle: state.root })),
   loadSongs: vi.fn(async () => ({ 'song-1': state.song })),
-  saveSongs: vi.fn(async () => undefined),
+  updateSongs: vi.fn(async () => ({})),
+  withStoredUserData: (fresh: unknown) => fresh,
   getFile: vi.fn(async () => new Blob(['audio'])),
   joinPath: (p: string) => p,
 }));

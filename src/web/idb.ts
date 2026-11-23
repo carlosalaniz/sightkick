@@ -80,3 +80,45 @@ export function idbGet<T>(key: string): Promise<T | undefined> {
 export function idbSet(key: string, value: unknown): Promise<void> {
   return run<void>('readwrite', (store) => store.put(value, key));
 }
+
+/**
+ * Reads, changes and writes one key in a single readwrite transaction, so a
+ * write from another handler can't land between the read and the write and
+ * be lost. `update` must be synchronous: the transaction commits as soon as
+ * it has no pending requests, so no awaiting (and no I/O) inside it. A throw
+ * from `update` aborts the transaction and rejects with that error.
+ */
+export function idbUpdate<T>(
+  key: string,
+  update: (current: unknown) => T,
+): Promise<T> {
+  return openDb().then(
+    (db) =>
+      new Promise<T>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        const read = store.get(key);
+        let next: { value: T } | undefined;
+        let failure: { error: unknown } | undefined;
+
+        read.onsuccess = () => {
+          try {
+            next = { value: update(read.result) };
+            store.put(next.value, key);
+          } catch (error) {
+            failure = { error };
+            tx.abort();
+          }
+        };
+        tx.oncomplete = () => {
+          if (next) {
+            resolve(next.value);
+          } else {
+            reject(new Error(`idbUpdate("${key}") finished without a value`));
+          }
+        };
+        tx.onerror = () => reject(failure ? failure.error : tx.error);
+        tx.onabort = () => reject(failure ? failure.error : tx.error);
+      }),
+  );
+}

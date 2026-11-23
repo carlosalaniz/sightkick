@@ -1,6 +1,7 @@
 import { SongData, StorageSchema } from '../types';
 import { BROWSER_ROOT_NAME } from '../browserLibrary';
-import { idbGet, idbSet } from './idb';
+import { log } from '../shared/log';
+import { idbGet, idbSet, idbUpdate } from './idb';
 
 // Where the song library lives in the browser build:
 // - 'browser': the origin-private file system (works in every modern browser,
@@ -118,17 +119,64 @@ export async function selectFolderRoot(
   return { kind: 'folder', handle, name: handle.name };
 }
 
-export async function loadSongs(
-  kind: RootKind,
-): Promise<StorageSchema['songs']> {
-  return (await idbGet<StorageSchema['songs']>(songsKey(kind))) ?? {};
+type SongMap = StorageSchema['songs'];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The fields the browser build relies on. The rest of SongData is song.ini
+ * metadata the UI only displays, so it isn't checked field by field.
+ */
+function isStoredSong(value: unknown): value is SongData {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.dir === 'string' &&
+    Array.isArray(value.audio)
+  );
 }
 
-export async function saveSongs(
+/** Parses the stored song map, dropping (and logging) entries it can't use. */
+export function parseSongMap(raw: unknown, kind: RootKind): SongMap {
+  if (raw === undefined) {
+    return {};
+  }
+
+  if (!isRecord(raw)) {
+    log.error('library.song_map_invalid', { kind, type: typeof raw });
+
+    return {};
+  }
+
+  const songs: SongMap = {};
+
+  for (const [id, song] of Object.entries(raw)) {
+    if (isStoredSong(song) && song.id === id) {
+      songs[id] = song;
+    } else {
+      log.warn('library.stored_song_dropped', { kind, songId: id });
+    }
+  }
+
+  return songs;
+}
+
+export async function loadSongs(kind: RootKind): Promise<SongMap> {
+  return parseSongMap(await idbGet<unknown>(songsKey(kind)), kind);
+}
+
+/**
+ * Changes the stored song map in one transaction. Every write to the map
+ * goes through here: the whole map is one IndexedDB value, so a separate
+ * load and save would drop whatever another handler (a like, a score, a
+ * finished split or download) wrote in between.
+ */
+export function updateSongs(
   kind: RootKind,
-  songs: StorageSchema['songs'],
-): Promise<void> {
-  await idbSet(songsKey(kind), songs);
+  update: (songs: SongMap) => SongMap,
+): Promise<SongMap> {
+  return idbUpdate(songsKey(kind), (raw) => update(parseSongMap(raw, kind)));
 }
 
 export async function updateStoredSong(
@@ -136,19 +184,86 @@ export async function updateStoredSong(
   id: string,
   update: (prev: SongData) => SongData,
 ): Promise<SongData> {
-  const songs = await loadSongs(kind);
-  const prev = songs[id];
+  const songs = await updateSongs(kind, (stored) => {
+    const prev = stored[id];
 
-  if (!prev) {
-    throw new Error(`Song "${id}" not found`);
+    if (!prev) {
+      throw new Error(`Song "${id}" not found`);
+    }
+
+    return { ...stored, [id]: update(prev) };
+  });
+
+  return songs[id];
+}
+
+/**
+ * `fresh` (rebuilt from the song's folder) with the player's own data from
+ * `stored`, the record as it is now: likes and scores only ever change in
+ * storage, so the stored copy is the newest.
+ */
+export function withStoredUserData(
+  fresh: SongData,
+  stored: SongData | undefined,
+): SongData {
+  if (!stored) {
+    return fresh;
   }
 
-  const next = update(prev);
+  const { liked: _liked, scoreData: _scoreData, ...rest } = fresh;
 
-  songs[id] = next;
-  await saveSongs(kind, songs);
+  return {
+    ...rest,
+    ...(stored.liked !== undefined ? { liked: stored.liked } : {}),
+    ...(stored.scoreData !== undefined ? { scoreData: stored.scoreData } : {}),
+  };
+}
 
-  return next;
+const audioOf = (song: SongData) =>
+  JSON.stringify([song.audio, song.drumKit ?? null, song.backing ?? null]);
+
+/**
+ * The song map a rescan saves. The scan read `before` when it started and
+ * can run for minutes; `current` is what is stored now, read in the same
+ * transaction as the save. What changed in storage meanwhile wins over the
+ * scan's copy: likes and scores, the audio of a split that finished (its
+ * stems may have been written after the scan listed the folder), and songs
+ * downloaded during the scan. Songs the scan didn't find are dropped, as
+ * before.
+ */
+export function mergeRescan(
+  scanned: SongMap,
+  before: SongMap,
+  current: SongMap,
+): SongMap {
+  const merged: SongMap = {};
+
+  for (const song of Object.values(scanned)) {
+    const now = current[song.id];
+    const then = before[song.id];
+    let next = withStoredUserData(song, now);
+
+    if (now && then && audioOf(now) !== audioOf(then)) {
+      const { drumKit: _drumKit, backing: _backing, ...rest } = next;
+
+      next = {
+        ...rest,
+        audio: now.audio,
+        ...(now.drumKit ? { drumKit: now.drumKit } : {}),
+        ...(now.backing ? { backing: now.backing } : {}),
+      };
+    }
+
+    merged[song.id] = next;
+  }
+
+  for (const [id, song] of Object.entries(current)) {
+    if (!(id in before) && !(id in merged)) {
+      merged[id] = song;
+    }
+  }
+
+  return merged;
 }
 
 const splitPath = (rel: string) => rel.split('/').filter(Boolean);
