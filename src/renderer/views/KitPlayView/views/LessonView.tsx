@@ -66,7 +66,16 @@ import {
   outcomeTone,
 } from './lesson/outcomeText';
 import { layoutStaff } from './lesson/staff';
-import { TempoControl } from './lesson/TempoControl';
+import { snapTempo, TEMPO_STEP, TempoControl } from './lesson/TempoControl';
+import {
+  adaptsPerBar,
+  afterBarHit,
+  afterBarMiss,
+  BarGuide,
+  barLevels,
+  meanLevel,
+} from './lesson/adaptive';
+import { CoachLayout, useNarrowScreen } from './lesson/CoachLayout';
 import { TempoBar } from './lesson/TempoBar';
 import {
   dueNotes,
@@ -148,8 +157,22 @@ const MIN_NEXT_PASS_SLACK_SECONDS = 0.15;
 const STALE_HIT_SECONDS = 1;
 /** Playback this far outside the window, s, isn't part of the pass. */
 const PASS_TRACK_MARGIN_SECONDS = 0.5;
+/** Bars of the staff a phone shows at once in the coach view; it scrolls. */
+const COACH_NARROW_BARS = 2;
 
-export function LessonView({ session }: { session: PlaySession }) {
+export type LessonVariant = 'lesson' | 'coach';
+
+/**
+ * The guided lesson. `lesson` is the v7 layout; `coach` (v14) runs the same
+ * lesson with per-bar fading help and a phone-first layout.
+ */
+export function LessonView({
+  session,
+  variant = 'lesson',
+}: {
+  session: PlaySession;
+  variant?: LessonVariant;
+}) {
   const { engine, bars, notes, pieceByVoice, timeStore, setPlaybackSpeed } =
     session;
   const songId = session.song.id;
@@ -272,9 +295,18 @@ export function LessonView({ session }: { session: PlaySession }) {
     [playable, mine],
   );
   const guide = step ? guideLevel(step, state.readGuide) : 1;
+  const coach = variant === 'coach';
+  const adaptive = coach && adaptsPerBar(kind);
+  const guideKey = `${win?.key}:${stepIdx}:${lessonIdx}`;
+  const [storedBarGuide, setBarGuide] = useState<BarGuide>();
+  const barGuide = adaptive
+    ? barLevels(storedBarGuide, guideKey, winBars.length, guide)
+    : undefined;
+  const shownGuide = barGuide ? meanLevel(barGuide) : guide;
   const hints = listening
     ? 1
-    : Math.max(0, Math.min(1, guide / FULL_HINTS_AT_GUIDE));
+    : Math.max(0, Math.min(1, shownGuide / FULL_HINTS_AT_GUIDE));
+  const narrow = useNarrowScreen();
   const layout = useMemo(
     () => layoutStaff(winBars, winNotes, guide),
     [winBars, winNotes, guide],
@@ -580,6 +612,19 @@ export function LessonView({ session }: { session: PlaySession }) {
       } else {
         t.hits.set(note.id, ms);
 
+        if (adaptive && win) {
+          const bar = note.measureIdx - win.startBar;
+
+          setBarGuide((prev) => ({
+            key: guideKey,
+            levels: afterBarHit(
+              barLevels(prev, guideKey, winBars.length, guide),
+              bar,
+              ms / state.speed,
+            ),
+          }));
+        }
+
         const index = winNotes.indexOf(note);
 
         if (index >= 0) {
@@ -651,6 +696,18 @@ export function LessonView({ session }: { session: PlaySession }) {
 
       if (index >= 0) {
         markStaffNote(staffRef.current, index, MISS_COLOR, true);
+      }
+
+      if (adaptive && win) {
+        const bar = note.measureIdx - win.startBar;
+
+        setBarGuide((prev) => ({
+          key: guideKey,
+          levels: afterBarMiss(
+            barLevels(prev, guideKey, winBars.length, guide),
+            bar,
+          ),
+        }));
       }
 
       setWait(waitMiss(wait.current));
@@ -767,6 +824,87 @@ export function LessonView({ session }: { session: PlaySession }) {
   const missingVoices = [...voicesOf(winNotes)]
     .filter((v) => !pieceByVoice.has(v))
     .map((v) => VOICE_INFO[v].name.toLowerCase());
+  const staff = (
+    <LessonStaff
+      key={`${win?.key}:${passId}`}
+      session={session}
+      layout={layout}
+      bars={winBars}
+      notes={winNotes}
+      pieceByVoice={pieceByVoice}
+      guide={guide}
+      onVoices={onVoices}
+      showCounts={kind !== 'listen'}
+      otherLabel={otherLabel}
+      svgRef={staffRef}
+      palette={coach ? 'stage' : 'paper'}
+      barGuide={barGuide}
+      visibleBars={coach && narrow ? COACH_NARROW_BARS : undefined}
+    />
+  );
+  const kit = (
+    <LessonKit
+      session={session}
+      notes={winNotes}
+      ringVoices={onVoices}
+      trackVoices={trackVoices}
+      hints={hints}
+      lookahead={lookahead}
+      hitIds={tracker}
+      flashes={flashes}
+      usedPieceIds={usedPieceIds}
+    />
+  );
+
+  if (coach) {
+    return (
+      <CoachLayout
+        lessons={lessons}
+        stars={stars}
+        lessonIdx={lessonIdx}
+        onPickLesson={goToLesson}
+        steps={steps}
+        stepIdx={stepIdx}
+        onPickStep={goToStep}
+        speed={state.speed}
+        starSpeed={state.baseSpeed}
+        onSpeed={(dir) =>
+          setState((s) => ({
+            ...s,
+            speed: snapTempo(s.speed + dir * TEMPO_STEP),
+          }))
+        }
+        isPlaying={session.isPlaying || session.isCounting}
+        onTogglePlay={session.togglePlay}
+        waitMode={waitMode}
+        onWaitMode={setWaitMode}
+        runUp={runUp}
+        onRunUp={setRunUp}
+        waitGraceMs={waitGraceMs}
+        onWaitGrace={setWaitGraceMs}
+        clickOn={session.clickVolume > 0}
+        onClick={(on) => session.setClickVolume(on ? DEFAULT_CLICK : 0)}
+        onRestartLessons={resetProgress}
+        toast={toast}
+        toastShown={toastShown}
+        waitingFor={waitingFor}
+        runUpFor={waitView.runUpFor}
+        timing={
+          timing.key === tempoKey
+            ? timing.stats
+            : { offsets: [], mean: undefined, spread: undefined }
+        }
+        waitStats={waitView.stats}
+        listening={listening}
+        result={result}
+        tip={tip}
+        pieceByVoice={pieceByVoice}
+        missingVoices={missingVoices}
+        staff={staff}
+        kit={kit}
+      />
+    );
+  }
 
   return (
     <div className="p-4 flex flex-col gap-4 max-w-[1500px] mx-auto">
@@ -926,33 +1064,11 @@ export function LessonView({ session }: { session: PlaySession }) {
                   .join(' + ')}
               </div>
             )}
-            <LessonStaff
-              key={`${win?.key}:${passId}`}
-              session={session}
-              layout={layout}
-              bars={winBars}
-              notes={winNotes}
-              pieceByVoice={pieceByVoice}
-              guide={guide}
-              onVoices={onVoices}
-              showCounts={kind !== 'listen'}
-              otherLabel={otherLabel}
-              svgRef={staffRef}
-            />
+            {staff}
           </div>
         </div>
         <div className="flex items-center rounded-[14px] border border-border bg-[#121315] p-2 min-[900px]:order-1">
-          <LessonKit
-            session={session}
-            notes={winNotes}
-            ringVoices={onVoices}
-            trackVoices={trackVoices}
-            hints={hints}
-            lookahead={lookahead}
-            hitIds={tracker}
-            flashes={flashes}
-            usedPieceIds={usedPieceIds}
-          />
+          {kit}
         </div>
       </div>
       <div className="grid gap-4 items-start grid-cols-1 min-[700px]:grid-cols-2 min-[1000px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_300px]">

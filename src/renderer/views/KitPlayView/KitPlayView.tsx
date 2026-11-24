@@ -44,6 +44,11 @@ import {
 import { KitHighwayView } from './views/KitHighwayView';
 import { SheetLanesView } from './views/SheetLanesView';
 import { LessonView } from './views/LessonView';
+
+function CoachView({ session }: { session: PlaySession }) {
+  return <LessonView session={session} variant="coach" />;
+}
+
 import { RailsView } from './views/RailsView';
 import { LanesView } from './views/LanesView';
 
@@ -56,6 +61,7 @@ const VIEW_COMPONENTS: Record<
   v7: LessonView,
   v12: RailsView,
   v13: LanesView,
+  v14: CoachView,
 };
 
 export function KitPlayView() {

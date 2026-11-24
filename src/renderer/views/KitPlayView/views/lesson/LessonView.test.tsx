@@ -231,6 +231,27 @@ describe('LessonView', () => {
     expect(session.seekSeconds).not.toHaveBeenCalled();
   });
 
+  it('lays the lesson out phone first in the coach variant (v14)', () => {
+    const { session } = makeSession();
+
+    render(<LessonView session={session} variant="coach" />);
+
+    expect(screen.getByTestId('coach-view')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Listen' })).toBeInTheDocument();
+
+    const wait = screen.getByTestId('wait-mode');
+
+    expect(wait).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(wait);
+    expect(screen.getByTestId('wait-mode')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    fireEvent.click(screen.getByTestId('tempo-down'));
+    expect(session.setPlaybackSpeed).toHaveBeenLastCalledWith(0.75);
+  });
+
   it('lets the player change the tempo', () => {
     const { session } = makeSession();
 

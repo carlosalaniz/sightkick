@@ -180,7 +180,7 @@ export function ResultPanel({ result }: { result: ShownResult | undefined }) {
   );
 }
 
-function TipText({
+export function TipText({
   tip,
   pieceByVoice,
 }: {

@@ -31,6 +31,12 @@ export const KIT_PLAY_VIEWS = [
     label: 'v13 · Lanes',
     description: 'Lanes standing over each pad, one hit line',
   },
+  {
+    id: 'v14',
+    label: 'v14 · Coach',
+    description:
+      'The lesson with help that fades bar by bar, laid out for a phone',
+  },
 ] as const;
 
 export type KitPlayViewId = (typeof KIT_PLAY_VIEWS)[number]['id'];
